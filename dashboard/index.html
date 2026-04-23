@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Indexing Monitor · MSP Launchpad</title>
+  <link rel="icon" type="image/png" href="/assets/msp-launchpad-logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Lexend:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar ----------------------------------------------------------->
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="/assets/msp-launchpad-logo.png" alt="MSP Launchpad" class="brand-logo" />
+        <div class="brand-meta">
+          <h3>Indexing Monitor</h3>
+          <span class="caption">Internal SEO tool · v1.0</span>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn" data-view="list" type="button">All clients</button>
+        <button class="nav-btn" data-view="add" type="button">Add client</button>
+      </nav>
+
+      <div class="sidebar-note">
+        Each client has its own sitemap, Search Console property,
+        database, and run history.
+      </div>
+
+      <div class="sidebar-bottom">
+        <h4>Appearance</h4>
+        <div class="theme-toggle" role="radiogroup" aria-label="Theme">
+          <button type="button" data-theme-choice="dark" class="theme-btn">Dark</button>
+          <button type="button" data-theme-choice="light" class="theme-btn">Light</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main content ------------------------------------------------------>
+    <main class="main" id="main">
+      <div class="content" id="content">
+        <!-- Rendered by app.js -->
+      </div>
+
+      <footer class="mspl-footer">
+        <strong>MSP LAUNCHPAD</strong>&nbsp;™ &middot; Indexing Monitor &middot; Internal SEO tooling
+      </footer>
+    </main>
+  </div>
+
+  <!-- Templates ---------------------------------------------------------->
+  <template id="tpl-list">
+    <header class="page-header">
+      <div class="eyebrow">DASHBOARD</div>
+      <h1>Website Page Indexing</h1>
+      <p class="sub">Track every client site's Google indexing status, run a fresh check, or review past reports.</p>
+    </header>
+
+    <div class="stats-strip" id="stats-strip"></div>
+
+    <div class="list-toolbar">
+      <div class="list-count" id="list-count"></div>
+      <div class="search">
+        <input type="text" id="search-input" placeholder="Search by name or domain…" autocomplete="off" />
+      </div>
+      <button class="btn btn-primary" data-nav="add" type="button">+ Add new client</button>
+    </div>
+
+    <hr />
+
+    <div id="client-list" class="client-list"></div>
+  </template>
+
+  <template id="tpl-detail">
+    <button class="btn btn-ghost btn-back" data-nav="list" type="button">← All clients</button>
+
+    <header class="page-header">
+      <h1 id="detail-name"></h1>
+      <p class="sub" id="detail-sub"></p>
+    </header>
+
+    <div id="run-output-area"></div>
+
+    <div class="tabs">
+      <div class="tab-list" role="tablist">
+        <button class="tab" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+        <button class="tab" data-tab="run" role="tab" aria-selected="false">Run</button>
+        <button class="tab" data-tab="history" role="tab" aria-selected="false">History</button>
+      </div>
+      <div class="tab-panels">
+        <div class="tab-panel" data-tab-panel="overview"></div>
+        <div class="tab-panel" data-tab-panel="run" hidden></div>
+        <div class="tab-panel" data-tab-panel="history" hidden></div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-add">
+    <button class="btn btn-ghost btn-back" data-nav="list" type="button">← All clients</button>
+
+    <header class="page-header">
+      <h1>Add a new client</h1>
+      <p class="sub">Add a client site to start tracking its Google indexing status.</p>
+    </header>
+
+    <div class="alert alert-info">
+      <strong>Heads up:</strong> before running a check on this client, their Search Console property
+      must already exist, and the service account bot
+      (<code>indexing-monitor-bot@indexing-monitor-494117.iam.gserviceaccount.com</code>) must be
+      added as an <strong>Owner</strong> in that property's Users and permissions.
+    </div>
+
+    <form id="add-form" class="form">
+      <label>
+        <span class="label">Client name</span>
+        <input name="name" type="text" required placeholder="e.g. Acme Corp" />
+      </label>
+      <label>
+        <span class="label">Website</span>
+        <input name="website" type="text" required placeholder="https://www.example.com/" />
+      </label>
+      <label>
+        <span class="label">Sitemap URL</span>
+        <input name="sitemap_url" type="text" placeholder="https://www.example.com/sitemap.xml" />
+        <span class="help">Leave blank to auto-fill as &lt;website&gt;/sitemap.xml</span>
+      </label>
+      <label>
+        <span class="label">Search Console property</span>
+        <input name="gsc_site_url" type="text" placeholder="https://www.example.com/  or  sc-domain:example.com" />
+        <span class="help">Must match exactly what Search Console has on file.</span>
+      </label>
+      <button class="btn btn-primary" type="submit">Save client</button>
+      <div id="add-error" class="alert alert-error" hidden></div>
+    </form>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>

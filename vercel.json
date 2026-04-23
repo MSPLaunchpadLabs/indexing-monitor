@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "dashboard",
+  "functions": {
+    "api/**/*.py": {
+      "runtime": "@vercel/python@4.3.1",
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/run-status", "destination": "/api/run_status" },
+    { "source": "/api/run-csv", "destination": "/api/run_csv" }
+  ]
+}

@@ -1220,17 +1220,17 @@ def start_run(client: Client) -> bool:
     client.reports_dir.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
 
-    # Credentials: local dev reads the service-account.json file; Streamlit
-    # Cloud deployments paste the JSON blob into secrets. gsc.py accepts
-    # either a path or raw JSON, so we forward whichever is available.
+    # Credentials resolution order: local file → GOOGLE_CREDENTIALS env var
+    # (Railway/Docker) → st.secrets (Streamlit Cloud). gsc.py accepts either
+    # a path or raw JSON, so we forward whichever is available.
     creds_value = str(CREDENTIALS_PATH)
     if not CREDENTIALS_PATH.exists():
-        try:
-            secret_blob = st.secrets.get("GOOGLE_CREDENTIALS", "")
-        except Exception:
-            secret_blob = ""
-        if secret_blob:
-            creds_value = secret_blob
+        creds_value = os.environ.get("GOOGLE_CREDENTIALS", "").strip()
+        if not creds_value:
+            try:
+                creds_value = st.secrets.get("GOOGLE_CREDENTIALS", "")
+            except Exception:
+                creds_value = ""
 
     env = os.environ.copy()
     env.update({

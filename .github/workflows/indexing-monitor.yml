@@ -1,21 +1,34 @@
 name: indexing-monitor
 
+# Triggered per-client from the Vercel dashboard via workflow_dispatch.
+# Both inputs are required — the Vercel API creates the Supabase `runs` row,
+# then dispatches the workflow so this runner only has to stream progress.
 on:
-  # Daily schedule disabled on 2026-04-22 — run manually only.
-  # To re-enable, uncomment the schedule block below.
-  # schedule:
-  #   - cron: '0 6 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: 'Supabase clients.id to run (e.g. "msplaunchpad")'
+        required: true
+        type: string
+      run_id:
+        description: 'Supabase runs.id (UUID) created by the /api/run endpoint'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  # Prevent two runs for the same client from stomping on each other. Queued
+  # runs for different clients are still allowed to proceed in parallel.
+  group: indexing-monitor-${{ inputs.client_id }}
+  cancel-in-progress: false
+
 jobs:
-  monitor:
-    name: Daily indexing check
+  run:
+    name: Indexing run (${{ inputs.client_id }})
     runs-on: ubuntu-latest
-    # Generous cap — typical runs finish in 1–2 minutes.
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -28,34 +41,15 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r engine/requirements.txt
 
-      # Restore indexing.db from previous runs so the 48h cooldown, URL
-      # history, and `is_new` diffing all survive across days. The unique
-      # key per run_id guarantees we always save a fresh copy at the end;
-      # restore-keys matches the most recent previous save.
-      - name: Restore/save indexing.db cache
-        uses: actions/cache@v4
-        with:
-          path: indexing.db
-          key: indexing-monitor-db-${{ github.run_id }}
-          restore-keys: |
-            indexing-monitor-db-
-
-      - name: Run indexing-monitor
+      - name: Run indexing engine
         env:
-          SITEMAP_URL:        ${{ secrets.SITEMAP_URL }}
-          GSC_SITE_URL:       ${{ secrets.GSC_SITE_URL }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python main.py run
-
-      # Upload the daily CSV as a downloadable artifact. `if: always()` so
-      # we still get the partial report even if the run failed mid-flow.
-      - name: Upload daily report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: indexing-report-${{ github.run_id }}
-          path: reports/
-          if-no-files-found: ignore
-          retention-days: 30
+          SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET:          ${{ secrets.SUPABASE_SECRET }}
+          GOOGLE_CREDENTIALS:       ${{ secrets.GOOGLE_CREDENTIALS }}
+          MAX_SUBMISSIONS_PER_RUN:  ${{ vars.MAX_SUBMISSIONS_PER_RUN || '180' }}
+          MAX_SUBMIT_ATTEMPTS_PER_URL: ${{ vars.MAX_SUBMIT_ATTEMPTS_PER_URL || '5' }}
+          PYTHONIOENCODING:         utf-8
+          PYTHONUTF8:               '1'
+        run: python -m engine.runner "${{ inputs.client_id }}" "${{ inputs.run_id }}"

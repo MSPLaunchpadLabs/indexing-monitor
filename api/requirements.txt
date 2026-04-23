@@ -1,0 +1,3 @@
+# Vercel Python serverless functions only need stdlib — our Supabase client is
+# plain urllib.request, so no runtime deps to install.
+# (This file tells Vercel the Python env is intentionally empty.)
