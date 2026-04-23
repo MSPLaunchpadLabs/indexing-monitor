@@ -1220,11 +1220,23 @@ def start_run(client: Client) -> bool:
     client.reports_dir.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
 
+    # Credentials: local dev reads the service-account.json file; Streamlit
+    # Cloud deployments paste the JSON blob into secrets. gsc.py accepts
+    # either a path or raw JSON, so we forward whichever is available.
+    creds_value = str(CREDENTIALS_PATH)
+    if not CREDENTIALS_PATH.exists():
+        try:
+            secret_blob = st.secrets.get("GOOGLE_CREDENTIALS", "")
+        except Exception:
+            secret_blob = ""
+        if secret_blob:
+            creds_value = secret_blob
+
     env = os.environ.copy()
     env.update({
         "SITEMAP_URL": client.sitemap_url,
         "GSC_SITE_URL": client.gsc_site_url,
-        "GOOGLE_CREDENTIALS": str(CREDENTIALS_PATH),
+        "GOOGLE_CREDENTIALS": creds_value,
         "INDEXING_DB_PATH": str(client.db_path),
         "REPORTS_DIR": str(client.reports_dir),
         "MAX_SUBMISSIONS_PER_RUN": "180",
