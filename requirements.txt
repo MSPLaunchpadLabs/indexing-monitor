@@ -1,0 +1,16 @@
+# Google API client (Search Console + Indexing)
+google-api-python-client==2.149.0
+google-auth==2.35.0
+
+# HTTP + XML parsing for sitemap fetch
+requests==2.32.3
+lxml>=5.3
+
+# Env loading + CLI + pretty terminal output
+python-dotenv==1.0.1
+click==8.1.7
+rich==13.9.4
+
+# Web dashboard
+streamlit>=1.38
+pandas>=2.2

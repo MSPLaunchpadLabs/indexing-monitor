@@ -1,0 +1,36 @@
+{
+  "clients": [
+    {
+      "id": "msplaunchpad",
+      "name": "MSP Launchpad",
+      "domain": "msplaunchpad.com",
+      "sitemap_url": "https://www.msplaunchpad.com/sitemap.xml",
+      "gsc_site_url": "https://www.msplaunchpad.com/",
+      "created_at": "2026-04-22"
+    },
+    {
+      "id": "techlocity",
+      "name": "Techlocity",
+      "domain": "techlocity.com",
+      "sitemap_url": "https://www.techlocity.com/sitemap.xml",
+      "gsc_site_url": "https://www.techlocity.com/",
+      "created_at": "2026-04-23"
+    },
+    {
+      "id": "rtc",
+      "name": "RTC",
+      "domain": "www.rtcmanaged.com",
+      "sitemap_url": "https://www.rtcmanaged.com/sitemap.xml",
+      "gsc_site_url": "https://www.rtcmanaged.com/",
+      "created_at": "2026-04-23"
+    },
+    {
+      "id": "ajtc",
+      "name": "AJTC",
+      "domain": "www.ajtc.net",
+      "sitemap_url": "https://www.ajtc.net/sitemap.xml",
+      "gsc_site_url": "https://www.ajtc.net/",
+      "created_at": "2026-04-23"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+[theme]
+# MSP Launchpad brand palette — dark-first (Portal default)
+base = "dark"
+primaryColor = "#FF782D"              # signature orange — CTAs, progress, accents
+backgroundColor = "#0D0D10"            # warm near-black app background
+secondaryBackgroundColor = "#15151B"   # elevated surfaces + sidebar
+textColor = "#F5F5F7"                  # primary text (high contrast on dark)
+font = "sans serif"
+
+[server]
+headless = true
