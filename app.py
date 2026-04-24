@@ -1115,8 +1115,8 @@ def render_client_card(client: Client) -> None:
             use_container_width=True,
             type="primary",
             disabled=status.running,
-            on_click=go_to_detail_and_run,
-            args=(client.id,),
+            on_click=start_run,
+            args=(client,),
         )
 
 
@@ -1459,36 +1459,9 @@ def render_run_status(client: Client) -> None:
         pct_frac = 1.0
     st.progress(pct_frac, text=progress_text)
 
-    # Metrics row
-    m1, m2, m3 = st.columns(3)
-    m1.metric("URLs inspected", f"{status.current:,}")
-    m2.metric(
-        "Total in sitemap", f"{status.total:,}" if status.total else "—"
-    )
-    m3.metric("Progress", f"{status.pct:.0f}%")
-
-    # Completion
-    if not status.running and status.finished_at:
-        if status.error:
-            st.error(f"Run failed: {status.error}")
-        else:
-            st.success(f"Run completed for {client.name}.")
-            today_csv = (
-                client.reports_dir
-                / f"{datetime.now().strftime('%Y-%m-%d')}.csv"
-            )
-            if today_csv.exists():
-                df = pd.read_csv(today_csv)
-                render_summary_metrics(summarize_report(df))
-                with open(today_csv, "rb") as f:
-                    st.download_button(
-                        label=f"Download {today_csv.name}",
-                        data=f.read(),
-                        file_name=f"{client.id}-{today_csv.name}",
-                        mime="text/csv",
-                        type="primary",
-                        key=f"run-dl-{client.id}-{today_csv.name}",
-                    )
+    # Show only the error, if any — the client card itself shows counts.
+    if not status.running and status.finished_at and status.error:
+        st.error(f"Run failed: {status.error}")
 
 
 def any_run_active(clients: list[Client]) -> bool:
