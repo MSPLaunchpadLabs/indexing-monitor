@@ -45,6 +45,7 @@
   --code-bg: #0d0d10;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --shadow-hover: 0 10px 25px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --logo-filter: invert(1);
 }
 
 [data-theme="light"] {
@@ -66,6 +67,7 @@
   --code-bg: #fafaf8;
   --shadow: 0 2px 8px rgba(13, 13, 16, 0.06);
   --shadow-hover: 0 8px 24px rgba(13, 13, 16, 0.08);
+  --logo-filter: none;
 }
 
 /* -----------------------------------------------------------------------

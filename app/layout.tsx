@@ -39,6 +39,22 @@ export default function RootLayout({
               borderColor: "var(--border)",
             }}
           >
+            <Link href="/" aria-label="MSP Launchpad" className="block no-underline">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/msp-launchpad-logo.png"
+                alt="MSP Launchpad"
+                width={170}
+                height={170}
+                style={{
+                  width: "170px",
+                  height: "auto",
+                  maxWidth: "100%",
+                  filter: "var(--logo-filter)",
+                }}
+              />
+            </Link>
+
             <Link href="/" className="flex items-center gap-3 no-underline">
               <span
                 aria-hidden
