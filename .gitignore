@@ -33,3 +33,11 @@ Thumbs.db
 FORWARD_TO_TEAMMATE.md
 
 .vercel
+
+# Next.js (Vercel rebuild)
+node_modules/
+.next/
+next-env.d.ts.bak
+out/
+.turbo/
+*.tsbuildinfo

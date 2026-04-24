@@ -1,8 +1,8 @@
-# Keep Vercel function bundles lean — only api/ and dashboard/ are used in
-# the cloud. Everything below is either the Streamlit local fallback, the
-# GitHub Actions engine, or local data / reports.
-
-# Streamlit local fallback
+# -------------------------------------------------------------------------
+# Streamlit local fallback — kept alive in parallel on Streamlit Cloud.
+# Vercel never sees these; the Streamlit deploy builds from the separate
+# Streamlit pipeline directly off the repo.
+# -------------------------------------------------------------------------
 app.py
 requirements.txt
 Procfile
@@ -10,35 +10,48 @@ runtime.txt
 run_state.py
 report.py
 main.py
+manual_submit.py
 db.py
 gsc.py
 sitemap.py
-
-# Used only by GitHub Actions, not by Vercel functions
-engine/
-
-# One-shot scripts (local)
-scripts/
-
-# Generated / local state
-data/
-reports/
 indexing.db
 indexing.db-journal
+clients.json
+.streamlit/
 
-# Assets are served from dashboard/assets/ — root copy is just originals
-assets/
+# -------------------------------------------------------------------------
+# Old half-done Vercel attempt — replaced by the Next.js app. Kept on disk
+# so history is preserved; excluded from the Vercel build so the new
+# Next.js app is the only thing deployed.
+# -------------------------------------------------------------------------
+dashboard/
+api/*.py
+api/_*.py
+api/requirements.txt
+api/__init__.py
+api/__pycache__/
 
-# Docs / scratch
+# -------------------------------------------------------------------------
+# Runs in GitHub Actions, not on Vercel
+# -------------------------------------------------------------------------
+engine/
+scripts/
+supabase/
+
+# -------------------------------------------------------------------------
+# Generated / local state
+# -------------------------------------------------------------------------
+data/
+reports/
+__pycache__/
+*.pyc
+
+# -------------------------------------------------------------------------
+# Docs / scratch / credentials
+# -------------------------------------------------------------------------
 README.md
 DEPLOY.md
 FORWARD_TO_TEAMMATE.md
-clients.json
-supabase/
-
-# Dotfiles / build scratch
 .env
 .env.*
 service-account*.json
-__pycache__/
-*.pyc

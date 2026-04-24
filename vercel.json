@@ -1,14 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "outputDirectory": "dashboard",
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "installCommand": "npm install",
   "functions": {
-    "api/**/*.py": {
-      "runtime": "@vercel/python@4.3.1",
+    "app/api/**/route.ts": {
       "maxDuration": 30
     }
-  },
-  "rewrites": [
-    { "source": "/api/run-status", "destination": "/api/run_status" },
-    { "source": "/api/run-csv", "destination": "/api/run_csv" }
-  ]
+  }
 }
