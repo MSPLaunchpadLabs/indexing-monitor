@@ -1467,10 +1467,6 @@ def render_run_status(client: Client) -> None:
     )
     m3.metric("Progress", f"{status.pct:.0f}%")
 
-    # Log tail
-    if status.log_tail:
-        st.code("\n".join(status.log_tail[-40:]), language="text")
-
     # Completion
     if not status.running and status.finished_at:
         if status.error:
