@@ -4,6 +4,7 @@ service-account*.json
 credentials*.json
 *-credentials.json
 google-credentials*.json
+.streamlit/secrets.toml
 
 # Local databases — recreated by the tool (one per client)
 indexing.db
@@ -30,3 +31,5 @@ Thumbs.db
 
 # Ephemeral deployment scratch
 FORWARD_TO_TEAMMATE.md
+
+.vercel

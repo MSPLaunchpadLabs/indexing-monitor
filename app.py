@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import pandas as pd
 import streamlit as st
 
+import manual_submit
 import run_state
 from run_state import RunStatus
 
@@ -201,6 +202,33 @@ if "search_query" not in st.session_state:
     st.session_state.search_query = ""
 if "theme_mode" not in st.session_state:
     st.session_state.theme_mode = "dark"
+# --- Submit URLs view state ---
+# `submit_routed` holds the RoutedUrl list after Analyze so it persists
+# across reruns without recomputing. `submit_overrides` maps URL→client_id
+# for rows the user has manually assigned (unknown-domain recovery).
+# `submit_results` is populated after Submit and holds per-URL outcomes.
+if "submit_input" not in st.session_state:
+    st.session_state.submit_input = ""
+if "submit_routed" not in st.session_state:
+    st.session_state.submit_routed = None
+if "submit_overrides" not in st.session_state:
+    st.session_state.submit_overrides = {}
+if "submit_results" not in st.session_state:
+    st.session_state.submit_results = None
+
+
+def resolve_credentials() -> str:
+    """Mirror the credentials lookup used by the sitemap runner:
+    service-account.json → GOOGLE_CREDENTIALS env var → st.secrets."""
+    if CREDENTIALS_PATH.exists():
+        return str(CREDENTIALS_PATH)
+    env_val = os.environ.get("GOOGLE_CREDENTIALS", "").strip()
+    if env_val:
+        return env_val
+    try:
+        return st.secrets.get("GOOGLE_CREDENTIALS", "")
+    except Exception:
+        return ""
 
 
 def get_theme() -> dict:
@@ -809,6 +837,10 @@ def go_to_add() -> None:
     st.session_state.view = "add"
 
 
+def go_to_submit() -> None:
+    st.session_state.view = "submit"
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — brand + nav
 # ---------------------------------------------------------------------------
@@ -826,6 +858,13 @@ with st.sidebar:
         use_container_width=True,
         on_click=go_to_list,
         disabled=st.session_state.view == "list",
+    )
+    st.button(
+        "Submit URLs",
+        use_container_width=True,
+        on_click=go_to_submit,
+        disabled=st.session_state.view == "submit",
+        help="Paste newly published URLs from any client and submit them for indexing.",
     )
     st.button(
         "Add client",
@@ -1082,6 +1121,139 @@ def render_client_card(client: Client) -> None:
 
 
 # ---------------------------------------------------------------------------
+# "This Month" manual-submissions card (rendered inside each client's Overview)
+# ---------------------------------------------------------------------------
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def _recheck_pending(client: Client) -> tuple[int, int]:
+    """Run inspect() on every manual URL that isn't confirmed indexed. Writes
+    fresh status back to the DB. Returns (rechecked_count, error_count)."""
+    from gsc import GoogleClient, GoogleClientError  # heavy import
+
+    urls = manual_submit.pending_urls(client.db_path)
+    if not urls:
+        return 0, 0
+
+    creds = resolve_credentials()
+    try:
+        gclient = GoogleClient(creds, client.gsc_site_url)
+    except GoogleClientError as e:
+        st.error(f"Can't authenticate for {client.name}: {e}")
+        return 0, len(urls)
+
+    errors = 0
+    progress = st.progress(0.0, text=f"Rechecking {len(urls)} URL(s)…")
+    for i, url in enumerate(urls, start=1):
+        try:
+            indexed, reason = gclient.inspect(url)
+            manual_submit.update_index_status(
+                client.db_path, url, indexed, reason
+            )
+        except Exception as e:  # noqa: BLE001 — surface errors but keep going
+            errors += 1
+            manual_submit.update_index_status(
+                client.db_path, url, None, f"Recheck error: {e}"
+            )
+        progress.progress(i / len(urls))
+    progress.empty()
+    return len(urls), errors
+
+
+def render_monthly_manual_card(client: Client) -> None:
+    """Summary + expandable table of THIS CALENDAR MONTH's manual submissions
+    for this client. Month picker lets users browse historical months too."""
+    now = datetime.now()
+    # Month picker — default to current month, offer the last 6 months.
+    month_options: list[tuple[int, int, str]] = []
+    y, mo = now.year, now.month
+    for _ in range(6):
+        month_options.append((y, mo, f"{_MONTH_NAMES[mo - 1]} {y}"))
+        mo -= 1
+        if mo == 0:
+            mo = 12
+            y -= 1
+
+    header_col, picker_col, action_col = st.columns([3, 2, 1])
+    header_col.markdown("#### 📤 Newly submitted pages")
+    selected_idx = picker_col.selectbox(
+        "Month",
+        options=list(range(len(month_options))),
+        format_func=lambda i: month_options[i][2],
+        index=0,
+        label_visibility="collapsed",
+        key=f"month-picker-{client.id}",
+    )
+    sel_year, sel_month, sel_label = month_options[selected_idx]
+
+    recheck_clicked = action_col.button(
+        "Recheck",
+        use_container_width=True,
+        key=f"recheck-{client.id}",
+        help="Re-query Google for the latest indexed status of pending URLs.",
+    )
+
+    summary = manual_submit.monthly_summary(client.db_path, sel_year, sel_month)
+
+    if summary["submitted"] == 0 and summary["failed"] == 0:
+        st.caption(
+            f"No manual submissions for **{client.name}** in {sel_label}. "
+            f"Use **Submit URLs** in the sidebar to add newly published pages."
+        )
+        st.divider()
+        return
+
+    # Summary tiles
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"Submitted in {sel_label}", summary["submitted"])
+    m2.metric("Indexed by Google", summary["indexed"])
+    m3.metric("Pending", summary["pending"])
+    m4.metric("Failed", summary["failed"])
+
+    # Recheck action (runs after metrics so fresh data is reflected on rerun)
+    if recheck_clicked:
+        checked, errs = _recheck_pending(client)
+        if checked == 0:
+            st.info("Nothing to recheck — all URLs confirmed indexed.")
+        else:
+            st.success(
+                f"Rechecked {checked} URL(s)"
+                + (f" · {errs} error(s)" if errs else "")
+            )
+        st.rerun()
+
+    # Expandable table
+    rows = manual_submit.monthly_submissions(client.db_path, sel_year, sel_month)
+    if rows:
+        with st.expander(
+            f"Show {len(rows)} submission(s) from {sel_label}", expanded=False
+        ):
+            df = pd.DataFrame([
+                {
+                    "URL": r["url"],
+                    "Submitted": "✓" if r["submitted"] else "✗",
+                    "Submitted at": (r["submitted_at"][:16].replace("T", " ")
+                                     if r["submitted_at"] else "—"),
+                    "Indexed": (
+                        "✅" if r["indexed"] == "true"
+                        else "❌" if r["indexed"] == "false"
+                        else "⏳"
+                    ),
+                    "Last checked": (r["last_checked"][:16].replace("T", " ")
+                                     if r["last_checked"] else "—"),
+                    "Attempts": r["attempts"],
+                    "Notes": r["notes"],
+                }
+                for r in rows
+            ])
+            st.dataframe(df, use_container_width=True, hide_index=True, height=320)
+    st.divider()
+
+
+# ---------------------------------------------------------------------------
 # DETAIL VIEW
 # ---------------------------------------------------------------------------
 def render_detail_view() -> None:
@@ -1119,6 +1291,8 @@ def render_detail_view() -> None:
 
     # --- OVERVIEW TAB ---
     with tab_overview:
+        render_monthly_manual_card(client)
+
         stats = client_stats(client)
         last_run = last_run_date(client)
 
@@ -1220,17 +1394,7 @@ def start_run(client: Client) -> bool:
     client.reports_dir.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
 
-    # Credentials resolution order: local file → GOOGLE_CREDENTIALS env var
-    # (Railway/Docker) → st.secrets (Streamlit Cloud). gsc.py accepts either
-    # a path or raw JSON, so we forward whichever is available.
-    creds_value = str(CREDENTIALS_PATH)
-    if not CREDENTIALS_PATH.exists():
-        creds_value = os.environ.get("GOOGLE_CREDENTIALS", "").strip()
-        if not creds_value:
-            try:
-                creds_value = st.secrets.get("GOOGLE_CREDENTIALS", "")
-            except Exception:
-                creds_value = ""
+    creds_value = resolve_credentials()
 
     env = os.environ.copy()
     env.update({
@@ -1427,10 +1591,279 @@ def render_add_view() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SUBMIT URLS VIEW
+# ---------------------------------------------------------------------------
+def _reset_submit_state() -> None:
+    st.session_state.submit_routed = None
+    st.session_state.submit_overrides = {}
+    st.session_state.submit_results = None
+
+
+def _client_by_id(clients: list[Client], cid: str) -> Client | None:
+    return next((c for c in clients if c.id == cid), None)
+
+
+def _do_manual_submit(
+    clients: list[Client],
+    grouped: dict[str, list[str]],
+) -> list[manual_submit.SubmissionResult]:
+    """Submit each URL via GSC using its client's property. Runs synchronously
+    because a handful of URLs per client takes seconds, not minutes."""
+    from gsc import GoogleClient, GoogleClientError  # lazy import — heavy deps
+
+    creds = resolve_credentials()
+    results: list[manual_submit.SubmissionResult] = []
+
+    # One GoogleClient per client (each has its own GSC property).
+    progress_total = sum(len(urls) for urls in grouped.values())
+    progress_bar = st.progress(0.0, text="Submitting…")
+    done = 0
+
+    for client_id, urls in grouped.items():
+        client = _client_by_id(clients, client_id)
+        if client is None:
+            for url in urls:
+                results.append(manual_submit.SubmissionResult(
+                    url, client_id, False, "Client not found"
+                ))
+                manual_submit.record_submission(
+                    Path(f"data/{client_id}.db"), url, False, "Client not found"
+                )
+                done += 1
+                progress_bar.progress(done / progress_total)
+            continue
+
+        try:
+            gclient = GoogleClient(creds, client.gsc_site_url)
+        except GoogleClientError as e:
+            for url in urls:
+                msg = f"Auth failed: {e}"
+                results.append(manual_submit.SubmissionResult(url, client_id, False, msg))
+                manual_submit.record_submission(client.db_path, url, False, msg)
+                done += 1
+                progress_bar.progress(done / progress_total)
+            continue
+
+        for url in urls:
+            progress_bar.progress(
+                done / progress_total,
+                text=f"Submitting {url[:60]}…",
+            )
+            try:
+                gclient.submit_url(url)
+                ok, msg = True, "Submitted to Indexing API"
+            except GoogleClientError as e:
+                ok, msg = False, f"Google error: {e}"
+            except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+                ok, msg = False, f"Error: {e}"
+
+            manual_submit.record_submission(client.db_path, url, ok, msg)
+            results.append(manual_submit.SubmissionResult(url, client_id, ok, msg))
+            done += 1
+            progress_bar.progress(done / progress_total)
+
+    progress_bar.empty()
+    return results
+
+
+def render_submit_view() -> None:
+    bc_col_1, _ = st.columns([1, 5])
+    bc_col_1.button("← All clients", on_click=go_to_list, key="submit-back")
+
+    render_header(
+        "Submit URLs for indexing",
+        "Paste newly published pages from any client. We'll auto-route each "
+        "URL to its Search Console property and submit it to Google's "
+        "Indexing API.",
+        eyebrow="Manual submissions",
+    )
+
+    clients = load_clients()
+    if not clients:
+        st.info("Add a client first — the Submit URLs flow uses each client's "
+                "Search Console property.")
+        return
+
+    # --- INPUT STAGE ---
+    st.markdown("#### 1. Paste URLs")
+    st.caption("One URL per line. Mix and match clients — we'll sort them.")
+
+    input_value = st.text_area(
+        "URLs",
+        value=st.session_state.submit_input,
+        height=180,
+        placeholder=(
+            "https://www.msplaunchpad.com/blog/new-post\n"
+            "https://www.techlocity.com/locations/dallas\n"
+            "https://www.ajtc.net/blog/security-update"
+        ),
+        label_visibility="collapsed",
+        key="submit_input_area",
+    )
+
+    col_a, col_b = st.columns([1, 1])
+    if col_a.button("Analyze URLs", type="primary", use_container_width=True):
+        st.session_state.submit_input = input_value
+        urls = [line.strip() for line in input_value.splitlines() if line.strip()]
+        st.session_state.submit_routed = manual_submit.route_urls(urls, clients)
+        st.session_state.submit_overrides = {}
+        st.session_state.submit_results = None
+        st.rerun()
+
+    if col_b.button("Clear", use_container_width=True):
+        st.session_state.submit_input = ""
+        _reset_submit_state()
+        st.rerun()
+
+    routed = st.session_state.submit_routed
+    if routed is None:
+        return
+
+    # --- PREVIEW STAGE ---
+    st.divider()
+    st.markdown("#### 2. Review routing")
+
+    if not routed:
+        st.warning("No URLs to submit. Paste some above and hit Analyze.")
+        return
+
+    # Apply any manual overrides the user has set for unknowns
+    overrides = st.session_state.submit_overrides
+    effective_client: dict[str, str | None] = {}
+    for r in routed:
+        effective_client[r.url] = overrides.get(r.url, r.client_id)
+
+    # Group by effective client for the preview + submit
+    grouped: dict[str, list[str]] = {}
+    unknowns: list[str] = []
+    for url, cid in effective_client.items():
+        if cid:
+            grouped.setdefault(cid, []).append(url)
+        else:
+            unknowns.append(url)
+
+    # Grouped preview tiles
+    matched_count = sum(len(v) for v in grouped.values())
+    unknown_count = len(unknowns)
+    invalid_count = sum(1 for r in routed if r.reason == "Not a valid URL")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ready to submit", matched_count)
+    c2.metric("Unknown domain", unknown_count - invalid_count)
+    c3.metric("Invalid URLs", invalid_count)
+
+    for client_id, urls in grouped.items():
+        client = _client_by_id(clients, client_id)
+        label = client.name if client else client_id
+        with st.expander(f"**{label}** — {len(urls)} URL(s) · {client.gsc_site_url if client else ''}", expanded=True):
+            for u in urls:
+                st.markdown(f"- `{u}`")
+
+    if unknowns:
+        with st.expander(f"⚠️ Unknown domain — {len(unknowns)} URL(s)", expanded=True):
+            st.caption(
+                "These URLs don't match any known client. Pick one manually, "
+                "or leave blank to skip."
+            )
+            client_options = ["(skip)"] + [c.id for c in clients]
+            client_labels = {c.id: c.name for c in clients}
+            for idx, u in enumerate(unknowns):
+                # Skip invalids — can't submit a malformed URL regardless of client
+                reason = next((r.reason for r in routed if r.url == u), "")
+                if reason == "Not a valid URL":
+                    st.markdown(f"- ❌ `{u}` *(invalid — will be skipped)*")
+                    continue
+
+                col_url, col_pick = st.columns([3, 2])
+                col_url.markdown(f"`{u}`")
+                current = overrides.get(u, "(skip)")
+                choice = col_pick.selectbox(
+                    "Assign to",
+                    options=client_options,
+                    index=client_options.index(current) if current in client_options else 0,
+                    format_func=lambda cid: "(skip)" if cid == "(skip)" else client_labels.get(cid, cid),
+                    key=f"override-{idx}",
+                    label_visibility="collapsed",
+                )
+                if choice == "(skip)":
+                    overrides.pop(u, None)
+                else:
+                    overrides[u] = choice
+
+    # --- SUBMIT STAGE ---
+    st.divider()
+    st.markdown("#### 3. Submit")
+
+    if matched_count == 0:
+        st.info("No URLs are ready to submit yet. Assign unknowns above or paste new URLs.")
+        return
+
+    if not resolve_credentials():
+        st.error(
+            "No Google credentials found. Drop `service-account.json` in the "
+            "project root, set the `GOOGLE_CREDENTIALS` env var, or paste it "
+            "into Streamlit Cloud secrets."
+        )
+        return
+
+    submit_clicked = st.button(
+        f"Submit {matched_count} URL(s) to Google",
+        type="primary",
+        use_container_width=True,
+    )
+    if submit_clicked:
+        # Re-build grouped dict from effective_client in case overrides changed
+        final_grouped: dict[str, list[str]] = {}
+        for url, cid in effective_client.items():
+            if cid:
+                final_grouped.setdefault(cid, []).append(url)
+        st.session_state.submit_results = _do_manual_submit(clients, final_grouped)
+        st.rerun()
+
+    # --- RESULTS STAGE ---
+    results = st.session_state.submit_results
+    if results is not None:
+        st.divider()
+        st.markdown("#### 4. Results")
+
+        ok_count = sum(1 for r in results if r.ok)
+        fail_count = len(results) - ok_count
+        r1, r2 = st.columns(2)
+        r1.metric("Submitted successfully", ok_count)
+        r2.metric("Failed", fail_count)
+
+        # Group results by client for easier reading
+        by_client: dict[str, list[manual_submit.SubmissionResult]] = {}
+        for r in results:
+            by_client.setdefault(r.client_id, []).append(r)
+
+        for cid, rs in by_client.items():
+            client = _client_by_id(clients, cid)
+            label = client.name if client else cid
+            ok = sum(1 for r in rs if r.ok)
+            with st.expander(f"**{label}** — {ok}/{len(rs)} succeeded", expanded=(ok != len(rs))):
+                for r in rs:
+                    icon = "✅" if r.ok else "❌"
+                    st.markdown(f"{icon} `{r.url}` — {r.message}")
+
+        st.caption(
+            "Results recorded in each client's database. Open the client's "
+            "dashboard to see the updated **This Month** card."
+        )
+
+        if st.button("Submit another batch", use_container_width=True):
+            st.session_state.submit_input = ""
+            _reset_submit_state()
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
 # Route
 # ---------------------------------------------------------------------------
 if st.session_state.view == "add":
     render_add_view()
+elif st.session_state.view == "submit":
+    render_submit_view()
 elif st.session_state.view == "detail" and st.session_state.selected_client_id:
     render_detail_view()
 else:

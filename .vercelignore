@@ -1,0 +1,44 @@
+# Keep Vercel function bundles lean — only api/ and dashboard/ are used in
+# the cloud. Everything below is either the Streamlit local fallback, the
+# GitHub Actions engine, or local data / reports.
+
+# Streamlit local fallback
+app.py
+requirements.txt
+Procfile
+runtime.txt
+run_state.py
+report.py
+main.py
+db.py
+gsc.py
+sitemap.py
+
+# Used only by GitHub Actions, not by Vercel functions
+engine/
+
+# One-shot scripts (local)
+scripts/
+
+# Generated / local state
+data/
+reports/
+indexing.db
+indexing.db-journal
+
+# Assets are served from dashboard/assets/ — root copy is just originals
+assets/
+
+# Docs / scratch
+README.md
+DEPLOY.md
+FORWARD_TO_TEAMMATE.md
+clients.json
+supabase/
+
+# Dotfiles / build scratch
+.env
+.env.*
+service-account*.json
+__pycache__/
+*.pyc
