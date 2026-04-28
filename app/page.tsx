@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { ClientListView } from "@/components/client-list-view";
-import type { ClientListItem } from "@/lib/supabase";
+import type { ClientListItem, QuotaPayload } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,6 +13,7 @@ type Payload = {
     indexed: number;
     active_runs: number;
   };
+  quota: QuotaPayload;
 };
 
 export default async function HomePage() {

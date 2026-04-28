@@ -4,6 +4,8 @@ import {
   type ClientListItem,
   type ClientRow,
   type CurrentRun,
+  type QuotaBreakdownRow,
+  type QuotaPayload,
   type RunRow,
   type RunStats,
 } from "@/lib/supabase";
@@ -36,6 +38,7 @@ export async function GET() {
         indexed: 0,
         active_runs: 0,
       },
+      quota: { used_today: 0, per_client: [] } satisfies QuotaPayload,
     });
   }
 
@@ -104,6 +107,36 @@ export async function GET() {
     };
   });
 
+  // Real 24h submission window — counts every URL submitted to the Indexing
+  // API in the last 24h, regardless of whether it came from a sitemap run or
+  // the manual /submit flow. Source of truth is `url_status.last_submitted`.
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: recentSubs } = await sb
+    .from("url_status")
+    .select("client_id,last_submitted")
+    .gte("last_submitted", cutoff)
+    .returns<{ client_id: string; last_submitted: string | null }[]>();
+
+  const perClient = new Map<string, { count: number; latest: string }>();
+  for (const row of recentSubs ?? []) {
+    if (!row.last_submitted) continue;
+    const cur = perClient.get(row.client_id);
+    if (cur) {
+      cur.count += 1;
+      if (row.last_submitted > cur.latest) cur.latest = row.last_submitted;
+    } else {
+      perClient.set(row.client_id, { count: 1, latest: row.last_submitted });
+    }
+  }
+  const breakdown: QuotaBreakdownRow[] = [...perClient.entries()]
+    .map(([client_id, { count, latest }]) => ({
+      client_id,
+      count,
+      last_submitted: latest,
+    }))
+    .sort((a, b) => b.count - a.count);
+  const usedToday = breakdown.reduce((sum, r) => sum + r.count, 0);
+
   return NextResponse.json({
     clients: out,
     dashboard: {
@@ -112,6 +145,10 @@ export async function GET() {
       indexed: indexedTotal,
       active_runs: Object.keys(currentRun).length,
     },
+    quota: {
+      used_today: usedToday,
+      per_client: breakdown,
+    } satisfies QuotaPayload,
   });
 }
 

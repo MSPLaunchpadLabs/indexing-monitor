@@ -137,3 +137,14 @@ export type ClientListItem = ClientRow & {
   last_run_at: string | null;
   current_run: CurrentRun | null;
 };
+
+export type QuotaBreakdownRow = {
+  client_id: string;
+  count: number;
+  last_submitted: string;
+};
+
+export type QuotaPayload = {
+  used_today: number;
+  per_client: QuotaBreakdownRow[];
+};

@@ -3,7 +3,7 @@
 import { ClientsGridView } from "@/components/clients-grid-view";
 import { StatsStrip } from "@/components/stats-strip";
 import { QuotaCard } from "@/components/quota-card";
-import type { ClientListItem } from "@/lib/supabase";
+import type { ClientListItem, QuotaPayload } from "@/lib/supabase";
 
 type Payload = {
   clients: ClientListItem[];
@@ -13,6 +13,7 @@ type Payload = {
     indexed: number;
     active_runs: number;
   };
+  quota: QuotaPayload;
 };
 
 export function ClientListView({ initial }: { initial: Payload }) {
@@ -63,7 +64,7 @@ export function ClientListView({ initial }: { initial: Payload }) {
         ]}
       />
 
-      <QuotaCard clients={initial.clients} />
+      <QuotaCard clients={initial.clients} quota={initial.quota} />
 
       <ClientsGridView clients={initial.clients} variant="preview" limit={4} />
     </div>

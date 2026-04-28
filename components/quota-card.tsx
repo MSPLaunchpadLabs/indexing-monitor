@@ -2,55 +2,44 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fmtInt, fmtRelative } from "@/lib/format";
-import type { ClientListItem } from "@/lib/supabase";
+import type { ClientListItem, QuotaPayload } from "@/lib/supabase";
 
 const DAILY_LIMIT = 200;
 
 type Props = {
-  usedToday?: number;
   clients?: ClientListItem[];
+  quota?: QuotaPayload;
 };
 
-export function QuotaCard({ usedToday, clients = [] }: Props) {
+export function QuotaCard({ clients = [], quota }: Props) {
   const [expanded, setExpanded] = useState(false);
 
-  // Today-window filter — anything whose latest run finished within the last
-  // 24h counts toward "today's" submissions. Lets the breakdown panel match
-  // the headline numbers without needing a new API.
-  const todayBreakdown = useMemo(() => {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    return clients
-      .map((c) => {
-        const submitted = c.stats?.submitted ?? 0;
-        const ts = c.last_run_at ? new Date(c.last_run_at).getTime() : 0;
-        const within24h = ts >= cutoff;
-        return {
-          id: c.id,
-          name: c.name,
-          submitted: within24h ? submitted : 0,
-          last_run_at: c.last_run_at,
-          fresh: within24h,
-        };
-      })
-      .sort((a, b) => b.submitted - a.submitted);
+  // Quota data is sourced from `url_status.last_submitted` (last 24h) on the
+  // server — that captures both manual /submit submissions AND sitemap-run
+  // submissions. We only need the clients list here to look up display names.
+  const nameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of clients) m.set(c.id, c.name);
+    return m;
   }, [clients]);
 
-  const derivedUsed = useMemo(
-    () => todayBreakdown.reduce((sum, r) => sum + r.submitted, 0),
-    [todayBreakdown],
+  const contributing = useMemo(
+    () =>
+      (quota?.per_client ?? []).map((row) => ({
+        id: row.client_id,
+        name: nameById.get(row.client_id) ?? row.client_id,
+        submitted: row.count,
+        last_submitted: row.last_submitted,
+      })),
+    [quota, nameById],
   );
 
-  const used = Math.max(
-    0,
-    Math.min(usedToday ?? derivedUsed, DAILY_LIMIT),
-  );
+  const used = Math.max(0, Math.min(quota?.used_today ?? 0, DAILY_LIMIT));
   const remaining = Math.max(0, DAILY_LIMIT - used);
   const pct = Math.round((used / DAILY_LIMIT) * 100);
 
   const safe = pct < 80;
   const resetCountdown = useResetCountdown();
-
-  const contributing = todayBreakdown.filter((r) => r.submitted > 0);
 
   return (
     <section
@@ -201,7 +190,7 @@ export function QuotaCard({ usedToday, clients = [] }: Props) {
                       className="w-16 text-right text-xs"
                       style={{ color: "var(--text-muted)" }}
                     >
-                      {fmtRelative(row.last_run_at)}
+                      {fmtRelative(row.last_submitted)}
                     </span>
                   </li>
                 );
