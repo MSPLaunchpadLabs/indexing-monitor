@@ -28,7 +28,9 @@ jobs:
   run:
     name: Indexing run (${{ inputs.client_id }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 285-URL sitemaps at ~0.5–1s/URL inspect + sequential submits push past 20m;
+    # bump to 60m so a full sitemap run can finish without GHA cancelling it.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
