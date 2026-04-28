@@ -48,33 +48,47 @@ export async function GET(
   const latestDone = runs.find((r) => r.status === "done") ?? null;
   const current = runs.find((r) => r.status === "running") ?? null;
 
-  let stats: RunStats | null = null;
-  let reasonBreakdown: ReasonRow[] = [];
-  if (latestDone) {
-    const total = (latestDone.indexed_count ?? 0) + (latestDone.not_indexed_count ?? 0);
-    stats = {
-      total,
-      indexed: latestDone.indexed_count ?? 0,
-      not_indexed: latestDone.not_indexed_count ?? 0,
-      submitted: latestDone.submitted_count ?? 0,
-    };
+  // Live counts from url_status — reflects every URL we've ever seen for this
+  // client (sitemap runs + manual submissions), not just the snapshot from the
+  // last finished run. Four cheap head=true count queries in parallel.
+  const baseQuery = () =>
+    sb.from("url_status").select("*", { count: "exact", head: true }).eq("client_id", clientId);
+  const [totalRes, indexedRes, notIndexedRes, submittedRes] = await Promise.all([
+    baseQuery(),
+    baseQuery().eq("indexed", "yes"),
+    baseQuery().eq("indexed", "no"),
+    baseQuery().eq("submitted", true),
+  ]);
 
-    if (stats.not_indexed > 0) {
-      const { data: notIndexedUrls } = await sb
-        .from("run_urls")
-        .select("notes")
-        .eq("run_id", latestDone.id)
-        .eq("indexed", "no")
-        .returns<{ notes: string | null }[]>();
-      const counter = new Map<string, number>();
-      for (const r of notIndexedUrls ?? []) {
-        const reason = r.notes?.trim() || "(no reason listed)";
-        counter.set(reason, (counter.get(reason) ?? 0) + 1);
-      }
-      reasonBreakdown = [...counter.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([reason, count]) => ({ reason, count }));
+  let stats: RunStats | null = null;
+  const totalCount = totalRes.count ?? 0;
+  if (totalCount > 0) {
+    stats = {
+      total: totalCount,
+      indexed: indexedRes.count ?? 0,
+      not_indexed: notIndexedRes.count ?? 0,
+      submitted: submittedRes.count ?? 0,
+    };
+  }
+
+  // Reason breakdown stays tied to the latest finished run — it's a per-run
+  // snapshot view and lives on the Coverage tab.
+  let reasonBreakdown: ReasonRow[] = [];
+  if (latestDone && (latestDone.not_indexed_count ?? 0) > 0) {
+    const { data: notIndexedUrls } = await sb
+      .from("run_urls")
+      .select("notes")
+      .eq("run_id", latestDone.id)
+      .eq("indexed", "no")
+      .returns<{ notes: string | null }[]>();
+    const counter = new Map<string, number>();
+    for (const r of notIndexedUrls ?? []) {
+      const reason = r.notes?.trim() || "(no reason listed)";
+      counter.set(reason, (counter.get(reason) ?? 0) + 1);
     }
+    reasonBreakdown = [...counter.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => ({ reason, count }));
   }
 
   return NextResponse.json({
