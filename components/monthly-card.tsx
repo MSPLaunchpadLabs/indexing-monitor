@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StatsStrip } from "@/components/stats-strip";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 import type { IndexedValue } from "@/lib/supabase";
 
@@ -24,6 +23,15 @@ type MonthlyPayload = {
   };
   rows: MonthlyRow[];
 };
+
+type MonthlyFilter = "submitted" | "indexed" | "pending" | "failed";
+
+function matchesFilter(r: MonthlyRow, filter: MonthlyFilter): boolean {
+  if (filter === "submitted") return r.submitted;
+  if (filter === "indexed") return r.submitted && r.indexed === "yes";
+  if (filter === "pending") return r.submitted && r.indexed !== "yes";
+  return !r.submitted; // failed
+}
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -52,9 +60,25 @@ export function MonthlyCard({ clientId, clientName }: { clientId: string; client
   const [data, setData] = useState<MonthlyPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [filter, setFilter] = useState<MonthlyFilter | null>(null);
 
   const sel = months[selected];
+
+  // Reset selected filter when the user switches months — the tiles for
+  // March make no sense applied to April's row list.
+  useEffect(() => {
+    setFilter(null);
+  }, [selected]);
+
+  function toggleFilter(next: MonthlyFilter) {
+    setFilter((cur) => (cur === next ? null : next));
+  }
+
+  const visibleRows = useMemo(() => {
+    if (!data) return [];
+    if (!filter) return data.rows;
+    return data.rows.filter((r) => matchesFilter(r, filter));
+  }, [data, filter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,45 +174,78 @@ export function MonthlyCard({ clientId, clientName }: { clientId: string; client
 
       {data && !empty ? (
         <>
-          <StatsStrip
-            items={[
-              {
-                label: `Submitted in ${sel.label}`,
-                value: data.summary.submitted,
-                tone: "accent",
-              },
-              {
-                label: "Indexed by Google",
-                value: data.summary.indexed,
-                tone: "success",
-              },
-              {
-                label: "Pending",
-                value: data.summary.pending,
-                tone: data.summary.pending > 0 ? "warning" : "default",
-              },
-              {
-                label: "Failed",
-                value: data.summary.failed,
-                tone: data.summary.failed > 0 ? "warning" : "default",
-              },
-            ]}
-          />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+            <MonthlyStatTile
+              label={`Submitted in ${sel.label}`}
+              value={data.summary.submitted}
+              color="var(--accent)"
+              icon="↑"
+              selected={filter === "submitted"}
+              onClick={() => toggleFilter("submitted")}
+            />
+            <MonthlyStatTile
+              label="Indexed by Google"
+              value={data.summary.indexed}
+              color="var(--color-success)"
+              icon="✓"
+              selected={filter === "indexed"}
+              onClick={() => toggleFilter("indexed")}
+            />
+            <MonthlyStatTile
+              label="Pending"
+              value={data.summary.pending}
+              color={
+                data.summary.pending > 0
+                  ? "var(--color-warning)"
+                  : "var(--text-muted)"
+              }
+              icon="•"
+              selected={filter === "pending"}
+              onClick={() => toggleFilter("pending")}
+            />
+            <MonthlyStatTile
+              label="Failed"
+              value={data.summary.failed}
+              color={
+                data.summary.failed > 0
+                  ? "var(--color-danger)"
+                  : "var(--text-muted)"
+              }
+              icon="✕"
+              selected={filter === "failed"}
+              onClick={() => toggleFilter("failed")}
+            />
+          </div>
 
-          {data.rows.length > 0 ? (
-            <div>
-              <button
-                type="button"
-                className="btn btn-ghost text-xs"
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? "Hide" : "Show"} {data.rows.length} submission
-                {data.rows.length === 1 ? "" : "s"} from {sel.label}
-              </button>
+          {filter ? (
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <h4 className="text-sm font-semibold">
+                  {filterHeading(filter, sel.label)}{" "}
+                  <span
+                    className="ml-1 text-xs font-normal"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {fmtInt(visibleRows.length)} of {fmtInt(data.rows.length)}
+                  </span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setFilter(null)}
+                  className="btn btn-ghost text-xs"
+                  aria-label="Clear filter"
+                >
+                  Close ✕
+                </button>
+              </div>
 
-              {expanded ? (
+              {visibleRows.length === 0 ? (
+                <p className="text-sm" style={{ color: "var(--text-soft)" }}>
+                  No URLs in this category for {sel.label}.
+                </p>
+              ) : (
                 <div
-                  className="mt-3 max-h-[360px] overflow-auto rounded-lg border"
+                  className="max-h-[360px] overflow-auto rounded-lg border"
                   style={{ borderColor: "var(--border)" }}
                 >
                   <table className="w-full text-sm">
@@ -213,7 +270,7 @@ export function MonthlyCard({ clientId, clientName }: { clientId: string; client
                       </tr>
                     </thead>
                     <tbody>
-                      {data.rows.map((r) => (
+                      {visibleRows.map((r) => (
                         <tr
                           key={r.url}
                           style={{ borderBottom: "1px solid var(--border)" }}
@@ -269,12 +326,71 @@ export function MonthlyCard({ clientId, clientName }: { clientId: string; client
                     </tbody>
                   </table>
                 </div>
-              ) : null}
+              )}
             </div>
           ) : null}
         </>
       ) : null}
     </div>
+  );
+}
+
+function filterHeading(filter: MonthlyFilter, monthLabel: string): string {
+  if (filter === "submitted") return `Submitted in ${monthLabel}`;
+  if (filter === "indexed") return `Indexed by Google — ${monthLabel}`;
+  if (filter === "pending") return `Pending — ${monthLabel}`;
+  return `Failed submissions — ${monthLabel}`;
+}
+
+function MonthlyStatTile({
+  label,
+  value,
+  color,
+  icon,
+  selected,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  icon: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className="surface surface-hover flex cursor-pointer flex-col gap-2 p-4 text-left"
+      style={{
+        background: "var(--surface)",
+        borderColor: selected ? "var(--accent-border)" : undefined,
+        boxShadow: selected
+          ? "0 0 0 1px var(--accent-border), var(--shadow)"
+          : undefined,
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <span className="caption">{label}</span>
+        <span
+          aria-hidden
+          className="grid h-6 w-6 place-items-center rounded-md text-sm font-semibold"
+          style={{
+            background: `color-mix(in srgb, ${color} 18%, transparent)`,
+            color,
+          }}
+        >
+          {icon}
+        </span>
+      </div>
+      <span
+        className="font-display text-2xl font-semibold leading-tight"
+        style={{ color }}
+      >
+        {fmtInt(value)}
+      </span>
+    </button>
   );
 }
 
