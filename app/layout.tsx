@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SidebarNav } from "@/components/sidebar-nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -33,38 +34,36 @@ export default function RootLayout({
       <body>
         <div className="grid min-h-screen grid-cols-[260px_1fr]">
           <aside
-            className="sticky top-0 flex h-screen min-h-screen flex-col gap-5 border-r p-6"
+            className="sticky top-0 flex h-screen min-h-screen flex-col gap-5 border-r p-5"
             style={{
-              background: "var(--surface)",
+              background: "var(--sidebar)",
               borderColor: "var(--border)",
             }}
           >
-            <Link href="/" aria-label="MSP Launchpad" className="block no-underline">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/msp-launchpad-logo.png"
-                alt="MSP Launchpad"
-                width={170}
-                height={170}
-                style={{
-                  width: "170px",
-                  height: "auto",
-                  maxWidth: "100%",
-                  filter: "var(--logo-filter)",
-                }}
-              />
+            <Link
+              href="/"
+              aria-label="MSP Launchpad"
+              className="block no-underline rounded-md px-3 py-2.5 text-center"
+              style={{
+                background: "#000",
+                color: "#fff",
+                fontFamily: "var(--font-display)",
+                fontWeight: 800,
+                fontSize: 15,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              MSP LAUNCHPAD<sup style={{ fontSize: 9, marginLeft: 2 }}>™</sup>
             </Link>
 
             <Link href="/" className="flex items-center gap-3 no-underline">
               <span
                 aria-hidden
-                className="grid h-11 w-11 place-items-center rounded-xl text-lg font-bold"
+                className="grid h-10 w-10 place-items-center rounded-md text-base font-bold"
                 style={{
-                  background:
-                    "linear-gradient(135deg, var(--brand-400, #ff8f4f) 0%, var(--brand-300, #ffa572) 100%)",
+                  background: "#f97316",
                   color: "#1a0f08",
-                  boxShadow:
-                    "0 1px 10px rgba(255,143,79,0.30), 0 0 22px rgba(255,143,79,0.12)",
                 }}
               >
                 IM
@@ -73,58 +72,37 @@ export default function RootLayout({
                 <h3 className="font-display text-base leading-tight">
                   Indexing Monitor
                 </h3>
-                <span className="caption">Internal SEO tool · v2</span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    fontWeight: 500,
+                  }}
+                >
+                  Internal SEO Tool · V2
+                </span>
               </div>
             </Link>
 
-            <nav className="flex flex-col gap-1.5">
-              <Link
-                href="/"
-                className="rounded-lg border px-3 py-2 text-sm font-semibold no-underline transition hover:[background:var(--surface-hover)]"
-                style={{
-                  borderColor: "var(--border)",
-                  color: "var(--text)",
-                }}
-              >
-                All clients
-              </Link>
-              <Link
-                href="/clients/new"
-                className="rounded-lg border px-3 py-2 text-sm font-semibold no-underline transition hover:[background:var(--surface-hover)]"
-                style={{
-                  borderColor: "var(--border)",
-                  color: "var(--text)",
-                }}
-              >
-                Add client
-              </Link>
-              <Link
-                href="/submit"
-                className="rounded-lg border px-3 py-2 text-sm font-semibold no-underline transition hover:[background:var(--surface-hover)]"
-                style={{
-                  borderColor: "var(--border)",
-                  color: "var(--text)",
-                }}
-              >
-                Submit URLs
-              </Link>
-            </nav>
+            <SidebarNav />
 
-            <p
-              className="mt-2 rounded-lg border p-3 text-xs leading-relaxed"
-              style={{
-                borderColor: "var(--border)",
-                background: "var(--surface-alt)",
-                color: "var(--text-soft)",
-              }}
-            >
-              Each client has its own sitemap, Search Console property, and run
-              history. Runs are kicked off here but executed by GitHub Actions.
-            </p>
-
-            <div className="mt-auto">
-              <h4 className="caption mb-2">Appearance</h4>
-              <ThemeToggle />
+            <div className="mt-auto flex flex-col gap-2.5">
+              <p
+                className="rounded-lg p-3 text-xs leading-relaxed"
+                style={{
+                  border: "0.5px solid var(--border)",
+                  background: "var(--surface)",
+                  color: "var(--text-soft)",
+                }}
+              >
+                Each client has its own sitemap, Search Console property, and
+                run history. Runs are kicked off here but executed by GitHub
+                Actions.
+              </p>
+              <div>
+                <h4 className="caption mb-2">Appearance</h4>
+                <ThemeToggle />
+              </div>
             </div>
           </aside>
 

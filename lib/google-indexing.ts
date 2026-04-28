@@ -33,12 +33,36 @@ function loadServiceAccount(): ServiceAccount {
   const raw = value.trimStart().startsWith("{")
     ? value
     : readFileSync(value, "utf-8");
-  const parsed = JSON.parse(raw) as ServiceAccount;
+
+  let parsed: ServiceAccount;
+  try {
+    parsed = JSON.parse(raw) as ServiceAccount;
+  } catch (e) {
+    throw new Error(
+      `GOOGLE_CREDENTIALS is not valid JSON: ${(e as Error).message}`,
+    );
+  }
   if (!parsed.client_email || !parsed.private_key) {
     throw new Error(
       "Service account JSON is missing client_email or private_key.",
     );
   }
+
+  // Vercel / docker / .env files often store the JSON with the private_key
+  // newlines as literal "\n" two-char sequences. JSON.parse leaves those
+  // alone, and createPrivateKey then sees a single-line garbage PEM, mints
+  // a bad signature, and Google replies "invalid_grant: Invalid JWT
+  // Signature". Normalize before signing.
+  const pem = parsed.private_key.replace(/\\n/g, "\n").trim();
+  if (!pem.startsWith("-----BEGIN") || !pem.includes("PRIVATE KEY-----")) {
+    throw new Error(
+      "GOOGLE_CREDENTIALS.private_key is not a valid PEM block. Re-paste the " +
+        "JSON exactly as Google issued it (with real newlines or escaped " +
+        "\\n inside the key).",
+    );
+  }
+  parsed.private_key = pem;
+
   cachedSa = parsed;
   return cachedSa;
 }

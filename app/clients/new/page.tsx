@@ -1,4 +1,5 @@
 import { AddClientForm } from "@/components/add-client-form";
+import { CopyChip } from "@/components/copy-chip";
 import Link from "next/link";
 
 // Service-account email from the existing dashboard — kept in sync so the
@@ -26,10 +27,10 @@ export default function AddClientPage() {
         }}
       >
         <strong>Heads up:</strong> before running a check on this client, their
-        Search Console property must already exist, and the service-account bot
-        (<code className="mono">{SERVICE_ACCOUNT_EMAIL}</code>) must be added as
-        an <strong>Owner</strong> in that property&apos;s Users &amp;
-        permissions.
+        Search Console property must already exist, and the service-account bot{" "}
+        <CopyChip value={SERVICE_ACCOUNT_EMAIL} label="service account email" />{" "}
+        must be added as an <strong>Owner</strong> in that property&apos;s
+        Users &amp; permissions.
       </div>
       <AddClientForm />
     </div>

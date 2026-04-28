@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
-import { StatsStrip } from "@/components/stats-strip";
 import { ProgressBar } from "@/components/progress-bar";
 import { MonthlyCard } from "@/components/monthly-card";
 import {
@@ -14,6 +13,21 @@ import {
   fmtRelative,
 } from "@/lib/format";
 import type { ClientRow, RunStats, RunStatus } from "@/lib/supabase";
+
+type UrlFilter = "all" | "indexed" | "not_indexed" | "submitted";
+
+type UrlListMode =
+  | { kind: "filter"; filter: UrlFilter }
+  | { kind: "reason"; reason: string };
+
+type UrlListRow = {
+  url: string;
+  indexed: "yes" | "no" | "unknown" | null;
+  last_checked: string | null;
+  submitted: boolean;
+  last_submitted: string | null;
+  notes: string | null;
+};
 
 type Reason = { reason: string; count: number };
 type CurrentRun = {
@@ -58,7 +72,7 @@ type HistoryItem = {
 
 type HistoryPayload = { runs: HistoryItem[] };
 
-type Tab = "overview" | "run" | "history";
+type Tab = "overview" | "run" | "coverage" | "history";
 
 export function ClientDetailView({ initial }: { initial: DetailPayload }) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -208,7 +222,7 @@ export function ClientDetailView({ initial }: { initial: DetailPayload }) {
             ? "Run in progress"
             : starting
               ? "Dispatching…"
-              : "Start a new check"}
+              : "Run now"}
         </button>
       </header>
 
@@ -230,7 +244,12 @@ export function ClientDetailView({ initial }: { initial: DetailPayload }) {
       {tab === "overview" ? (
         <OverviewPanel detail={detail} />
       ) : tab === "run" ? (
-        <RunPanel run={runStatus} />
+        <RunPanel run={runStatus} clientId={detail.client.id} />
+      ) : tab === "coverage" ? (
+        <CoveragePanel
+          clientId={detail.client.id}
+          reasonBreakdown={detail.reason_breakdown}
+        />
       ) : (
         <HistoryPanel runs={history} />
       )}
@@ -245,6 +264,7 @@ function TabNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "run", label: "Run" },
+    { id: "coverage", label: "Coverage" },
     { id: "history", label: "History" },
   ];
   return (
@@ -282,39 +302,74 @@ function TabNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
 // Overview
 // ===========================================================================
 function OverviewPanel({ detail }: { detail: DetailPayload }) {
-  const { client, stats, reason_breakdown } = detail;
+  const { client, stats } = detail;
+  const [filter, setFilter] = useState<UrlFilter | null>(null);
+
+  function toggle(next: UrlFilter) {
+    setFilter((cur) => (cur === next ? null : next));
+  }
+
   return (
     <div className="space-y-6">
       <MonthlyCard clientId={client.id} clientName={client.name} />
 
       {stats ? (
-        <StatsStrip
-          items={[
-            { label: "Total URLs", value: stats.total },
-            {
-              label: "Indexed",
-              value: stats.indexed,
-              tone: "success",
-            },
-            {
-              label: "Not indexed",
-              value: stats.not_indexed,
-              tone: stats.not_indexed > 0 ? "warning" : "default",
-            },
-            {
-              label: "Submitted",
-              value: stats.submitted,
-              tone: "accent",
-              hint: "last run",
-            },
-          ]}
-        />
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <GoogleLogo />
+            <h3 className="text-base font-semibold">Google Search</h3>
+            <span className="pill pill-success">Active</span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+            <StatTile
+              label="Total URLs"
+              value={stats.total}
+              color="var(--text)"
+              icon="#"
+              selected={filter === "all"}
+              onClick={() => toggle("all")}
+            />
+            <StatTile
+              label="Indexed"
+              value={stats.indexed}
+              color="var(--color-success)"
+              icon="✓"
+              selected={filter === "indexed"}
+              onClick={() => toggle("indexed")}
+            />
+            <StatTile
+              label="Not Indexed"
+              value={stats.not_indexed}
+              color="var(--color-danger)"
+              icon="✕"
+              selected={filter === "not_indexed"}
+              onClick={() => toggle("not_indexed")}
+            />
+            <StatTile
+              label="Submitted for Indexing"
+              value={stats.submitted}
+              color="var(--accent)"
+              icon="↑"
+              selected={filter === "submitted"}
+              onClick={() => toggle("submitted")}
+            />
+          </div>
+
+          {filter ? (
+            <UrlListPanel
+              clientId={client.id}
+              mode={{ kind: "filter", filter }}
+              onClose={() => setFilter(null)}
+            />
+          ) : null}
+        </div>
       ) : (
         <div
           className="surface p-6 text-sm"
           style={{ color: "var(--text-soft)" }}
         >
-          No completed run yet. Click <strong>Start a new check</strong> to
+          No completed run yet. Click <strong>Run now</strong> to
           generate the first report.
         </div>
       )}
@@ -333,30 +388,392 @@ function OverviewPanel({ detail }: { detail: DetailPayload }) {
         </dl>
       </div>
 
-      {reason_breakdown.length > 0 ? (
-        <div className="surface space-y-3 p-5">
-          <h3>Why URLs are not indexed</h3>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Grouped by Google&apos;s reason, from the last completed run.
-          </p>
-          <ul className="space-y-2">
-            {reason_breakdown.map((r) => (
-              <li
-                key={r.reason}
-                className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                style={{
-                  borderColor: "var(--border)",
-                  background: "var(--surface-alt)",
-                }}
-              >
-                <span className="truncate text-sm">{r.reason}</span>
-                <span className="pill pill-warning">{fmtInt(r.count)}</span>
+    </div>
+  );
+}
+
+// ===========================================================================
+// Coverage — "Why URLs are not indexed" with clickable reason → URL list.
+// Kept as its own tab so the Overview stays focused on the headline numbers.
+// ===========================================================================
+function CoveragePanel({
+  clientId,
+  reasonBreakdown,
+}: {
+  clientId: string;
+  reasonBreakdown: Reason[];
+}) {
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+
+  function toggleReason(next: string) {
+    setSelectedReason((cur) => (cur === next ? null : next));
+  }
+
+  if (reasonBreakdown.length === 0) {
+    return (
+      <div
+        className="surface p-6 text-sm"
+        style={{ color: "var(--text-soft)" }}
+      >
+        No coverage breakdown yet. Run a check to pull Google&apos;s reasons
+        for any pages that aren&apos;t indexed.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="surface space-y-3 p-5">
+        <h3>Why URLs are not indexed</h3>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          Grouped by Google&apos;s reason, from the last completed run. Click
+          a reason to see the URLs.
+        </p>
+        <ul className="space-y-2">
+          {reasonBreakdown.map((r) => {
+            const isSelected = selectedReason === r.reason;
+            return (
+              <li key={r.reason}>
+                <button
+                  type="button"
+                  onClick={() => toggleReason(r.reason)}
+                  aria-pressed={isSelected}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-white/5"
+                  style={{
+                    borderColor: isSelected
+                      ? "var(--accent-border)"
+                      : "var(--border)",
+                    background: "var(--surface-alt)",
+                    boxShadow: isSelected
+                      ? "0 0 0 1px var(--accent-border)"
+                      : undefined,
+                  }}
+                >
+                  <span className="truncate text-sm">{r.reason}</span>
+                  <span className="pill pill-warning">{fmtInt(r.count)}</span>
+                </button>
               </li>
-            ))}
-          </ul>
-        </div>
+            );
+          })}
+        </ul>
+      </div>
+
+      {selectedReason ? (
+        <UrlListPanel
+          clientId={clientId}
+          mode={{ kind: "reason", reason: selectedReason }}
+          onClose={() => setSelectedReason(null)}
+        />
       ) : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stat tile — clickable card under the Google Search header
+// ---------------------------------------------------------------------------
+function StatTile({
+  label,
+  value,
+  color,
+  icon,
+  selected,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  icon: string;
+  selected?: boolean;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
+      <div className="flex items-center justify-between">
+        <span className="caption">{label}</span>
+        <span
+          aria-hidden
+          className="grid h-6 w-6 place-items-center rounded-md text-sm font-semibold"
+          style={{
+            background: `color-mix(in srgb, ${color} 18%, transparent)`,
+            color,
+          }}
+        >
+          {icon}
+        </span>
+      </div>
+      <span
+        className="font-display text-2xl font-semibold leading-tight"
+        style={{ color }}
+      >
+        {fmtInt(value)}
+      </span>
+    </>
+  );
+
+  const tileStyle: React.CSSProperties = {
+    background: "var(--surface)",
+    borderColor: selected ? "var(--accent-border)" : undefined,
+    boxShadow: selected
+      ? "0 0 0 1px var(--accent-border), var(--shadow)"
+      : undefined,
+  };
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={!!selected}
+        className="surface surface-hover flex cursor-pointer flex-col gap-2 p-4 text-left"
+        style={tileStyle}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="surface flex flex-col gap-2 p-4"
+      style={tileStyle}
+    >
+      {inner}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// URL list — opens under the stat cards when one is selected
+// ---------------------------------------------------------------------------
+function UrlListPanel({
+  clientId,
+  mode,
+  onClose,
+}: {
+  clientId: string;
+  mode: UrlListMode;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<UrlListRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  const fetchUrl =
+    mode.kind === "filter"
+      ? `/api/clients/${clientId}/urls?status=${mode.filter}`
+      : `/api/clients/${clientId}/urls-by-reason?reason=${encodeURIComponent(
+          mode.reason,
+        )}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(fetchUrl, { cache: "no-store" });
+        const data = (await res.json()) as { urls?: UrlListRow[]; error?: string };
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.error ?? `HTTP ${res.status}`);
+          setRows([]);
+          return;
+        }
+        setRows(data.urls ?? []);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setRows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchUrl]);
+
+  const visible = useMemo(() => {
+    if (!rows) return [];
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? rows.filter((r) => r.url.toLowerCase().includes(q))
+      : rows;
+    const isAllFilter = mode.kind === "filter" && mode.filter === "all";
+    if (!isAllFilter) return filtered;
+    // For "All URLs" view: group by indexed status with Indexed on top, then
+    // Not Indexed, then Unknown — and within each group, freshest first.
+    const rank = (r: UrlListRow) =>
+      r.indexed === "yes" ? 0 : r.indexed === "no" ? 1 : 2;
+    return [...filtered].sort((a, b) => {
+      const diff = rank(a) - rank(b);
+      if (diff !== 0) return diff;
+      const at = a.last_checked ? new Date(a.last_checked).getTime() : 0;
+      const bt = b.last_checked ? new Date(b.last_checked).getTime() : 0;
+      return bt - at;
+    });
+  }, [rows, search, mode]);
+
+  const heading =
+    mode.kind === "reason"
+      ? mode.reason
+      : mode.filter === "all"
+        ? "All URLs"
+        : mode.filter === "indexed"
+          ? "Indexed URLs"
+          : mode.filter === "not_indexed"
+            ? "Not Indexed URLs"
+            : "Submitted URLs";
+
+  return (
+    <div className="surface space-y-3 p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto flex items-baseline gap-2">
+          <h3>{heading}</h3>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {rows ? `${visible.length} of ${rows.length}` : "loading…"}
+          </span>
+        </div>
+        <input
+          className="input max-w-xs"
+          placeholder="Search URLs…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button
+          type="button"
+          onClick={onClose}
+          className="btn btn-ghost"
+          aria-label="Close URL list"
+        >
+          Close ✕
+        </button>
+      </div>
+
+      {error ? (
+        <div
+          className="rounded-lg border p-3 text-sm"
+          style={{
+            borderColor: "rgba(251,113,133,0.3)",
+            background: "rgba(251,113,133,0.08)",
+            color: "var(--color-danger)",
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
+
+      {rows === null ? (
+        <p className="text-sm" style={{ color: "var(--text-soft)" }}>
+          Loading…
+        </p>
+      ) : visible.length === 0 ? (
+        <p className="text-sm" style={{ color: "var(--text-soft)" }}>
+          {rows.length === 0
+            ? "No URLs match this filter yet."
+            : "Nothing matches the search."}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr
+                className="text-left"
+                style={{
+                  borderBottom: "1px solid var(--border)",
+                  color: "var(--text-muted)",
+                  fontSize: "11px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                <th className="px-3 py-2">URL</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Last Checked</th>
+                <th className="px-3 py-2">Coverage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r) => (
+                <UrlRow key={r.url} row={r} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UrlRow({ row }: { row: UrlListRow }) {
+  const indexedTone =
+    row.indexed === "yes"
+      ? "pill-success"
+      : row.indexed === "no"
+        ? "pill-danger"
+        : "pill-neutral";
+  const indexedLabel =
+    row.indexed === "yes"
+      ? "Indexed"
+      : row.indexed === "no"
+        ? "Not Indexed"
+        : "Unknown";
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td className="px-3 py-2">
+        <a
+          href={row.url}
+          target="_blank"
+          rel="noreferrer"
+          className="mono text-[12.5px]"
+          style={{ color: "var(--text)" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {row.url}
+        </a>
+      </td>
+      <td className="px-3 py-2">
+        <span className={`pill ${indexedTone}`}>{indexedLabel}</span>
+      </td>
+      <td className="px-3 py-2 mono" style={{ color: "var(--text-soft)" }}>
+        {row.last_checked ? fmtDateTime(row.last_checked) : "—"}
+      </td>
+      <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)" }}>
+        {row.notes || (row.submitted ? "Submitted to Indexing API" : "—")}
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Google logo (multi-color G)
+// ---------------------------------------------------------------------------
+function GoogleLogo({ size = 22 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      aria-label="Google"
+      role="img"
+    >
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+      <path fill="none" d="M0 0h48v48H0z" />
+    </svg>
   );
 }
 
@@ -396,15 +813,24 @@ function Field({
 // ===========================================================================
 // Run tab
 // ===========================================================================
-function RunPanel({ run }: { run: RunStatusPayload["run"] }) {
+function RunPanel({
+  run,
+  clientId,
+}: {
+  run: RunStatusPayload["run"];
+  clientId: string;
+}) {
   if (!run) {
     return (
-      <div
-        className="surface p-6 text-sm"
-        style={{ color: "var(--text-soft)" }}
-      >
-        No run has been started yet for this client. Click{" "}
-        <strong>Start a new check</strong> above.
+      <div className="space-y-5">
+        <div
+          className="surface p-6 text-sm"
+          style={{ color: "var(--text-soft)" }}
+        >
+          No run has been started yet for this client. Click{" "}
+          <strong>Run now</strong> above.
+        </div>
+        <ActivityLog clientId={clientId} />
       </div>
     );
   }
@@ -487,8 +913,183 @@ function RunPanel({ run }: { run: RunStatusPayload["run"] }) {
             : "(no log output yet)"}
         </pre>
       </div>
+
+      <ActivityLog clientId={clientId} />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Activity Log — recent URL submission events for this client. Polls every
+// 15s. Source rows come from url_status (last_submitted, notes), so anything
+// that gets pushed to the Indexing API surfaces here within one tick.
+// ---------------------------------------------------------------------------
+type ActivityEvent = {
+  url: string;
+  last_submitted: string | null;
+  notes: string | null;
+  submit_attempts: number;
+  source: "sitemap" | "manual";
+};
+
+const ACTIVITY_REFRESH_MS = 15_000;
+
+function ActivityLog({ clientId }: { clientId: string }) {
+  const [events, setEvents] = useState<ActivityEvent[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [, setTickNow] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/api/clients/${clientId}/activity?limit=100`,
+          { cache: "no-store" },
+        );
+        const data = (await res.json()) as {
+          events?: ActivityEvent[];
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.error ?? `HTTP ${res.status}`);
+          return;
+        }
+        setEvents(data.events ?? []);
+        setError(null);
+        setLastUpdated(Date.now());
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    };
+    tick();
+    const id = setInterval(tick, ACTIVITY_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [clientId]);
+
+  // Drives the "Last updated: Ns ago" label so it ticks every second between
+  // refreshes — without this it would only update on each fetch.
+  useEffect(() => {
+    const id = setInterval(() => setTickNow((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const lastUpdatedLabel = lastUpdated
+    ? `Last updated: ${formatAgo(Date.now() - lastUpdated)}`
+    : "Last updated: --";
+
+  return (
+    <div className="surface p-5">
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+        <h3>Activity Log</h3>
+      </div>
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+        Recent automation events · {lastUpdatedLabel} · refreshes every 15s
+      </p>
+
+      {error ? (
+        <div
+          className="mt-3 rounded-lg border p-3 text-sm"
+          style={{
+            borderColor: "rgba(251,113,133,0.3)",
+            background: "rgba(251,113,133,0.08)",
+            color: "var(--color-danger)",
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
+
+      <div className="mt-4 overflow-x-auto">
+        {events === null ? (
+          <p className="text-sm" style={{ color: "var(--text-soft)" }}>
+            Loading…
+          </p>
+        ) : events.length === 0 ? (
+          <p className="text-sm" style={{ color: "var(--text-soft)" }}>
+            No URL submission activity yet.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr
+                className="text-left"
+                style={{
+                  borderBottom: "1px solid var(--border)",
+                  color: "var(--text-muted)",
+                  fontSize: "11px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                <th className="px-3 py-2">Time</th>
+                <th className="px-3 py-2">Action</th>
+                <th className="px-3 py-2">URL</th>
+                <th className="px-3 py-2">Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e, i) => (
+                <ActivityRow key={`${e.url}-${e.last_submitted}-${i}`} event={e} />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActivityRow({ event }: { event: ActivityEvent }) {
+  return (
+    <tr
+      className="align-middle"
+      style={{ borderBottom: "1px solid var(--border)" }}
+    >
+      <td
+        className="whitespace-nowrap px-3 py-2"
+        style={{ color: "var(--text-soft)" }}
+      >
+        {fmtDateTime(event.last_submitted)}
+      </td>
+      <td className="px-3 py-2">
+        <span className="pill pill-success">Submit</span>
+      </td>
+      <td
+        className="mono max-w-[24rem] truncate px-3 py-2 text-xs"
+        style={{ color: "var(--text-soft)" }}
+        title={event.url}
+      >
+        <a
+          href={event.url}
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: "inherit" }}
+        >
+          {event.url}
+        </a>
+      </td>
+      <td className="px-3 py-2" style={{ color: "var(--text)" }}>
+        {event.notes?.trim() || "Submitted URL for indexing"}
+      </td>
+    </tr>
+  );
+}
+
+function formatAgo(ms: number): string {
+  if (ms < 1000) return "just now";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
 }
 
 // ===========================================================================

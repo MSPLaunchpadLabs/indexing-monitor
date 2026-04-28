@@ -22,7 +22,7 @@ export function StatsStrip({ items }: { items: Item[] }) {
         return (
           <div
             key={item.label}
-            className="surface flex flex-col gap-1 p-4"
+            className="surface surface-hover flex flex-col gap-1 p-4"
             style={{ background: "var(--surface)" }}
           >
             <span className="caption">{item.label}</span>

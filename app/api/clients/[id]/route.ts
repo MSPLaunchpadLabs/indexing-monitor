@@ -94,3 +94,33 @@ export async function GET(
       : null,
   });
 }
+
+/**
+ * DELETE /api/clients/[id] — removes the client and all related rows.
+ *
+ * Cascade rules in the schema (`url_status`, `runs`, `run_urls`) drop the
+ * dependent records automatically, so this is a single delete against the
+ * clients table.
+ */
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const clientId = id.trim();
+  if (!clientId) {
+    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  }
+
+  const sb = supabase();
+
+  const { error } = await sb.from("clients").delete().eq("id", clientId);
+  if (error) {
+    return NextResponse.json(
+      { error: `supabase: ${error.message}` },
+      { status: 502 },
+    );
+  }
+
+  return NextResponse.json({ ok: true, id: clientId });
+}

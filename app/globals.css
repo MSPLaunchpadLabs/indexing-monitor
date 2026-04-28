@@ -1,17 +1,16 @@
 @import "tailwindcss";
 
 /* -----------------------------------------------------------------------
-   Brand tokens — ported from the original Streamlit + vanilla-JS dashboard
-   so the Vercel rebuild keeps the same MSP Launchpad look.
+   Brand tokens — MSP Launchpad style
 ----------------------------------------------------------------------- */
 @theme {
-  --color-brand-300: #ffa572;
-  --color-brand-400: #ff8f4f;
-  --color-brand-500: #ff782d;
-  --color-brand-600: #e86a1f;
+  --color-brand-300: #fb923c;
+  --color-brand-400: #f97316;
+  --color-brand-500: #ea580c;
+  --color-brand-600: #c2410c;
 
-  --color-success: #a3e635;
-  --color-warning: #fbbf24;
+  --color-success: #4ade80;
+  --color-warning: #f97316;
   --color-danger: #fb7185;
 
   --font-display: "Lexend", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -24,25 +23,26 @@
 ----------------------------------------------------------------------- */
 :root,
 [data-theme="dark"] {
-  --bg: #0d0d10;
-  --bg-gradient:
-    radial-gradient(ellipse 80% 50% at 20% 10%, rgba(255, 143, 79, 0.08), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 40%, rgba(255, 143, 79, 0.04), transparent),
-    #0d0d10;
-  --surface: #15151b;
-  --surface-alt: #1c1c24;
-  --surface-hover: #1c1c24;
+  --bg: #111214;
+  --bg-gradient: #111214;
+  --sidebar: #0d0e10;
+  --surface: #18191c;
+  --surface-alt: #1f2023;
+  --surface-hover: #1f2023;
   --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 143, 79, 0.3);
+  --border-strong: rgba(249, 115, 22, 0.3);
   --text: #f5f5f7;
   --text-soft: #b8b8c4;
-  --text-muted: #7a7a88;
-  --accent: #ff8f4f;
-  --accent-hover: #ffa572;
-  --accent-soft: rgba(255, 143, 79, 0.08);
-  --accent-border: rgba(255, 143, 79, 0.24);
-  --input-bg: #0d0d10;
-  --code-bg: #0d0d10;
+  --text-muted: #555;
+  --text-dim: #444;
+  --nav-inactive: #888;
+  --nav-hover: #e2e8f0;
+  --accent: #f97316;
+  --accent-hover: #fb923c;
+  --accent-soft: rgba(249, 115, 22, 0.08);
+  --accent-border: rgba(249, 115, 22, 0.3);
+  --input-bg: #111214;
+  --code-bg: #0d0e10;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --shadow-hover: 0 10px 25px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --logo-filter: invert(1);
@@ -51,18 +51,22 @@
 [data-theme="light"] {
   --bg: #f6f6f4;
   --bg-gradient: linear-gradient(180deg, #ffffff 0%, #fafaf8 100%);
+  --sidebar: #ffffff;
   --surface: #ffffff;
   --surface-alt: #f0f0ec;
   --surface-hover: #f0f0ec;
   --border: rgba(13, 13, 16, 0.06);
-  --border-strong: rgba(255, 120, 45, 0.4);
+  --border-strong: rgba(249, 115, 22, 0.4);
   --text: #0d0d10;
   --text-soft: #4a4a56;
   --text-muted: #7a7a88;
-  --accent: #ff782d;
-  --accent-hover: #e86a1f;
-  --accent-soft: rgba(255, 143, 79, 0.08);
-  --accent-border: rgba(255, 143, 79, 0.24);
+  --text-dim: #9a9aa8;
+  --nav-inactive: #555;
+  --nav-hover: #0d0d10;
+  --accent: #f97316;
+  --accent-hover: #ea580c;
+  --accent-soft: rgba(249, 115, 22, 0.08);
+  --accent-border: rgba(249, 115, 22, 0.3);
   --input-bg: #ffffff;
   --code-bg: #fafaf8;
   --shadow: 0 2px 8px rgba(13, 13, 16, 0.06);
@@ -143,12 +147,19 @@ hr {
 ----------------------------------------------------------------------- */
 .surface {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
   box-shadow: var(--shadow);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
 }
 .surface-hover:hover {
   background: var(--surface-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
   box-shadow: var(--shadow-hover);
 }
 
@@ -171,13 +182,14 @@ hr {
   cursor: not-allowed;
 }
 .btn-primary {
-  background: linear-gradient(135deg, var(--brand-400, #ff8f4f) 0%, var(--brand-300, #ffa572) 100%);
+  background: var(--accent);
   color: #1a0f08;
-  box-shadow: 0 1px 10px rgba(255, 143, 79, 0.4), 0 0 30px rgba(255, 143, 79, 0.15);
+  box-shadow: 0 1px 10px rgba(249, 115, 22, 0.4), 0 0 30px rgba(249, 115, 22, 0.15);
 }
 .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
   transform: translateY(-1px);
-  box-shadow: 0 2px 14px rgba(255, 143, 79, 0.5), 0 0 40px rgba(255, 143, 79, 0.25);
+  box-shadow: 0 2px 14px rgba(249, 115, 22, 0.5), 0 0 40px rgba(249, 115, 22, 0.25);
 }
 .btn-secondary {
   background: var(--surface);
@@ -243,14 +255,14 @@ hr {
   text-transform: uppercase;
 }
 .pill-success {
-  background: rgba(163, 230, 53, 0.12);
-  color: var(--color-success, #a3e635);
-  border: 1px solid rgba(163, 230, 53, 0.2);
+  background: rgba(74, 222, 128, 0.12);
+  color: var(--color-success, #4ade80);
+  border: 1px solid rgba(74, 222, 128, 0.25);
 }
 .pill-warning {
-  background: rgba(251, 191, 36, 0.12);
-  color: var(--color-warning, #fbbf24);
-  border: 1px solid rgba(251, 191, 36, 0.2);
+  background: rgba(249, 115, 22, 0.12);
+  color: var(--color-warning, #f97316);
+  border: 1px solid rgba(249, 115, 22, 0.25);
 }
 .pill-danger {
   background: rgba(251, 113, 133, 0.12);
@@ -271,6 +283,61 @@ hr {
 .mono {
   font-family: var(--font-mono);
   font-size: 12.5px;
+}
+
+/* -----------------------------------------------------------------------
+   Sidebar nav — active / inactive states
+----------------------------------------------------------------------- */
+.nav-link {
+  display: block;
+  padding: 9px 12px 9px 14px;
+  border-left: 2px solid transparent;
+  border-radius: 0 8px 8px 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--nav-inactive);
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.nav-link:hover {
+  color: var(--nav-hover);
+  text-decoration: none;
+}
+.nav-link.is-active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* -----------------------------------------------------------------------
+   Ghost dashed add-card
+----------------------------------------------------------------------- */
+.ghost-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 100%;
+  padding: 28px;
+  border-radius: 12px;
+  border: 1.5px dashed var(--border);
+  background: transparent;
+  color: var(--text-soft);
+  text-align: center;
+  text-decoration: none;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+.ghost-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--accent);
+  transform: translateY(-2px);
+  text-decoration: none;
 }
 
 /* Scrollbar styling for dark mode (webkit only) */

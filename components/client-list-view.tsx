@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { ClientCard } from "@/components/client-card";
+import { ClientsGridView } from "@/components/clients-grid-view";
 import { StatsStrip } from "@/components/stats-strip";
+import { QuotaCard } from "@/components/quota-card";
 import type { ClientListItem } from "@/lib/supabase";
 
 type Payload = {
@@ -17,17 +16,6 @@ type Payload = {
 };
 
 export function ClientListView({ initial }: { initial: Payload }) {
-  const [search, setSearch] = useState("");
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return initial.clients;
-    return initial.clients.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) || c.domain.toLowerCase().includes(q),
-    );
-  }, [initial.clients, search]);
-
   return (
     <div className="space-y-8">
       <header>
@@ -42,14 +30,14 @@ export function ClientListView({ initial }: { initial: Payload }) {
       <StatsStrip
         items={[
           {
-            label: "Total clients",
+            label: "Total Clients",
             value: initial.dashboard.total_clients,
             hint: `${
               initial.clients.filter((c) => c.stats).length
             } with run data`,
           },
           {
-            label: "URLs tracked",
+            label: "URLs Tracked",
             value: initial.dashboard.urls_tracked,
             hint: "Across all sitemaps",
           },
@@ -59,15 +47,15 @@ export function ClientListView({ initial }: { initial: Payload }) {
             tone: "success",
             hint:
               initial.dashboard.urls_tracked > 0
-                ? `${initial.dashboard.indexed} of ${initial.dashboard.urls_tracked} · ${Math.round(
+                ? `${Math.round(
                     (initial.dashboard.indexed /
                       initial.dashboard.urls_tracked) *
                       100,
-                  )}%`
+                  )}% of tracked URLs`
                 : "No runs yet",
           },
           {
-            label: "Active runs",
+            label: "Active Runs",
             value: initial.dashboard.active_runs,
             tone: initial.dashboard.active_runs > 0 ? "accent" : "default",
             hint: initial.dashboard.active_runs > 0 ? "Live now" : "Idle",
@@ -75,61 +63,9 @@ export function ClientListView({ initial }: { initial: Payload }) {
         ]}
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <span
-          className="mr-auto text-sm"
-          style={{ color: "var(--text-soft)" }}
-        >
-          Showing{" "}
-          <strong style={{ color: "var(--text)" }}>{filtered.length}</strong>{" "}
-          of{" "}
-          <strong style={{ color: "var(--text)" }}>
-            {initial.clients.length}
-          </strong>
-        </span>
-        <input
-          className="input max-w-sm"
-          placeholder="Search by name or domain…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Link href="/clients/new" className="btn btn-primary">
-          + Add new client
-        </Link>
-      </div>
+      <QuotaCard clients={initial.clients} />
 
-      <hr />
-
-      {filtered.length === 0 ? (
-        <EmptyState hasClients={initial.clients.length > 0} />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {filtered.map((c) => (
-            <ClientCard key={c.id} client={c} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EmptyState({ hasClients }: { hasClients: boolean }) {
-  return (
-    <div
-      className="surface flex flex-col items-center gap-4 p-10 text-center"
-      style={{ background: "var(--surface)" }}
-    >
-      <h3>{hasClients ? "No matches" : "No clients yet"}</h3>
-      <p className="max-w-md" style={{ color: "var(--text-soft)" }}>
-        {hasClients
-          ? "Nothing matches the search. Try a different query."
-          : "Add your first client to start tracking Google indexing."}
-      </p>
-      {!hasClients ? (
-        <Link href="/clients/new" className="btn btn-primary">
-          Add client
-        </Link>
-      ) : null}
+      <ClientsGridView clients={initial.clients} variant="preview" limit={4} />
     </div>
   );
 }
