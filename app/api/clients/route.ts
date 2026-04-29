@@ -107,10 +107,15 @@ export async function GET() {
     };
   });
 
-  // Real 24h submission window — counts every URL submitted to the Indexing
-  // API in the last 24h, regardless of whether it came from a sitemap run or
-  // the manual /submit flow. Source of truth is `url_status.last_submitted`.
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // "Today" means since UTC midnight, matching the countdown displayed in the
+  // QuotaCard ("Resets in HH:MM:SS" ticks toward UTC midnight). Earlier we
+  // used a rolling 24h window which left submissions from yesterday afternoon
+  // still counted after the displayed reset. Source of truth is
+  // `url_status.last_submitted`, so this captures both manual /submit
+  // submissions and engine-run submissions.
+  const startOfUtcDay = new Date();
+  startOfUtcDay.setUTCHours(0, 0, 0, 0);
+  const cutoff = startOfUtcDay.toISOString();
   const { data: recentSubs } = await sb
     .from("url_status")
     .select("client_id,last_submitted")
