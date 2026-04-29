@@ -688,6 +688,7 @@ function UrlListPanel({
               >
                 <th className="px-3 py-2">URL</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Submitted</th>
                 <th className="px-3 py-2">Last Checked</th>
                 <th className="px-3 py-2">Coverage</th>
                 <th className="px-3 py-2 text-right">Actions</th>
@@ -719,6 +720,73 @@ function UrlListPanel({
 }
 
 type UrlActionUpdate = Partial<UrlListRow> & { url: string };
+
+// Google's typical indexing window after a URL is submitted to the
+// Indexing API. There's no SLA — these numbers come from the Search
+// Console docs as a rough operator expectation.
+const INDEX_EXPECTED_DAYS_MIN = 1;
+const INDEX_EXPECTED_DAYS_MAX = 7;
+
+function SubmittedCell({
+  lastSubmitted,
+  submitted,
+  indexed,
+}: {
+  lastSubmitted: string | null;
+  submitted: boolean;
+  indexed: "yes" | "no" | "unknown" | null;
+}) {
+  if (!lastSubmitted) {
+    return <span style={{ color: "var(--text-muted)" }}>—</span>;
+  }
+  const sentMs = new Date(lastSubmitted).getTime();
+  const ageDays = (Date.now() - sentMs) / (1000 * 60 * 60 * 24);
+  const isIndexed = indexed === "yes";
+
+  // Pending: not yet confirmed indexed → estimate a window.
+  // Confirmed indexed: just say "Indexed".
+  // Late (still not indexed past the window): nudge.
+  let hint: { label: string; tone: string };
+  if (isIndexed) {
+    hint = { label: "Indexed by Google", tone: "var(--color-success)" };
+  } else if (!submitted) {
+    hint = { label: "submission failed", tone: "var(--color-danger)" };
+  } else if (ageDays > INDEX_EXPECTED_DAYS_MAX) {
+    hint = {
+      label: `still pending after ${Math.floor(ageDays)}d — try Re-inspect`,
+      tone: "var(--color-warning)",
+    };
+  } else {
+    const remainingMin = Math.max(0, INDEX_EXPECTED_DAYS_MIN - ageDays);
+    const remainingMax = Math.max(0, INDEX_EXPECTED_DAYS_MAX - ageDays);
+    if (remainingMax === 0) {
+      hint = {
+        label: "expected indexing soon",
+        tone: "var(--text-muted)",
+      };
+    } else {
+      const lo = Math.max(1, Math.ceil(remainingMin));
+      const hi = Math.max(lo, Math.ceil(remainingMax));
+      hint = {
+        label: `expected in ${lo === hi ? `${hi}d` : `${lo}–${hi}d`}`,
+        tone: "var(--text-muted)",
+      };
+    }
+  }
+
+  const tooltip = `Submitted ${fmtDateTime(lastSubmitted)} — Google typically indexes URLs within ${INDEX_EXPECTED_DAYS_MIN}–${INDEX_EXPECTED_DAYS_MAX} days after submission.`;
+
+  return (
+    <span title={tooltip} className="inline-flex flex-col gap-0.5">
+      <span style={{ color: "var(--text)" }}>
+        {fmtRelative(lastSubmitted)}
+      </span>
+      <span className="text-[11px]" style={{ color: hint.tone }}>
+        {hint.label}
+      </span>
+    </span>
+  );
+}
 
 function UrlRow({
   row,
@@ -804,6 +872,13 @@ function UrlRow({
       </td>
       <td className="px-3 py-2">
         <span className={`pill ${indexedTone}`}>{indexedLabel}</span>
+      </td>
+      <td className="px-3 py-2 text-xs" style={{ color: "var(--text-soft)" }}>
+        <SubmittedCell
+          lastSubmitted={row.last_submitted}
+          submitted={row.submitted}
+          indexed={row.indexed}
+        />
       </td>
       <td className="px-3 py-2 mono" style={{ color: "var(--text-soft)" }}>
         {row.last_checked ? fmtDateTime(row.last_checked) : "—"}
