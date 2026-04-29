@@ -156,8 +156,9 @@ def run(client_id: str, run_id: str) -> int:
 
         # --- Step 2: diff + upsert ----------------------------------------
         today = db.today_iso()
-        new_count = db.reset_is_new_and_upsert_urls(sb, client_id, sitemap_urls, today)
-        ctx.log_line(f"2. diff: {new_count} new URL(s)")
+        new_urls = db.reset_is_new_and_upsert_urls(sb, client_id, sitemap_urls, today)
+        new_url_set = set(new_urls)
+        ctx.log_line(f"2. diff: {len(new_urls)} new URL(s)")
         ctx.update_progress(0, len(sitemap_urls))
 
         # --- Step 3: inspect ---------------------------------------------
@@ -186,42 +187,89 @@ def run(client_id: str, run_id: str) -> int:
             ctx.update_progress(i, len(sitemap_urls))
             time.sleep(INSPECT_SLEEP_SECONDS)
 
-        # --- Step 4: submit not-indexed ----------------------------------
-        ctx.log_line("4. submitting not-indexed URLs")
+        # --- Step 4: submit (new pages first, then existing not-indexed) ---
+        # Two passes share the same daily quota cap. Pass 1 prioritizes URLs
+        # that were freshly added to the sitemap this run — that's the whole
+        # point of the Indexing API: tell Google about new content fast.
+        # Pass 2 fills any remaining quota with the existing not-indexed
+        # backlog. Within each pass we walk in sitemap order so the order is
+        # deterministic.
+        ctx.log_line("4. submitting (new pages first, then not-indexed)")
         submitted = 0
+        quota_exhausted_during_submit = False
         max_submissions = _env_int("MAX_SUBMISSIONS_PER_RUN", 180)
         max_attempts = _env_int("MAX_SUBMIT_ATTEMPTS_PER_URL", 5)
+
+        new_pass = [u for u in sitemap_urls if u in new_url_set]
+        existing_pass = [u for u in sitemap_urls if u not in new_url_set]
+
+        def submit_one(url: str) -> str:
+            """Returns 'submitted' | 'skipped' | 'quota' | 'auth' | 'error'."""
+            nonlocal submitted, quota_exhausted_during_submit
+            if submitted >= max_submissions:
+                db.set_note(sb, client_id, url, "deferred: daily quota")
+                return "skipped"
+            eligible, _reason = db.should_submit(
+                sb, client_id, url, max_attempts=max_attempts
+            )
+            if not eligible:
+                return "skipped"
+            try:
+                gsc.submit_url(url)
+            except QuotaExceededError as e:
+                ctx.log_line(f"   submit quota hit — stopping ({e})")
+                quota_exhausted_during_submit = True
+                return "quota"
+            except GoogleAuthError as e:
+                ctx.log_line(f"   auth error: {e}")
+                return "auth"
+            except RuntimeError as e:
+                db.set_note(sb, client_id, url, f"submit error: {e}"[:500])
+                return "error"
+            db.record_submission(sb, client_id, url)
+            submitted += 1
+            return "submitted"
 
         if quota_hit:
             ctx.log_line("   skipped — inspection quota was exhausted")
         else:
-            for url in sitemap_urls:
-                if submitted >= max_submissions:
-                    db.set_note(sb, client_id, url, "deferred: daily quota")
-                    continue
-
-                eligible, reason = db.should_submit(
-                    sb, client_id, url, max_attempts=max_attempts
-                )
-                if not eligible:
-                    continue
-
-                try:
-                    gsc.submit_url(url)
-                except QuotaExceededError as e:
-                    ctx.log_line(f"   submit quota hit — stopping ({e})")
-                    break
-                except GoogleAuthError as e:
-                    ctx.log_line(f"   auth error: {e}")
-                    ctx.finish(status="failed", error=str(e))
+            ctx.log_line(
+                f"   pass 1 — {len(new_pass)} newly added URL(s) get priority"
+            )
+            new_submitted = 0
+            for url in new_pass:
+                outcome = submit_one(url)
+                if outcome == "submitted":
+                    new_submitted += 1
+                    ctx.log_line(f"   [new] submitted: {url}")
+                elif outcome == "auth":
+                    ctx.finish(status="failed", error="auth error during submit")
                     return 1
-                except RuntimeError as e:
-                    db.set_note(sb, client_id, url, f"submit error: {e}"[:500])
-                    continue
+                elif outcome == "quota":
+                    break
+            ctx.log_line(
+                f"   pass 1 done — submitted {new_submitted}/{len(new_pass)} new URL(s)"
+            )
 
-                db.record_submission(sb, client_id, url)
-                submitted += 1
-                ctx.log_line(f"   submitted: {url}")
+            if not quota_exhausted_during_submit and submitted < max_submissions:
+                ctx.log_line(
+                    f"   pass 2 — filling remaining quota ({max_submissions - submitted}) "
+                    f"with existing not-indexed URLs"
+                )
+                existing_submitted = 0
+                for url in existing_pass:
+                    outcome = submit_one(url)
+                    if outcome == "submitted":
+                        existing_submitted += 1
+                        ctx.log_line(f"   submitted: {url}")
+                    elif outcome == "auth":
+                        ctx.finish(status="failed", error="auth error during submit")
+                        return 1
+                    elif outcome == "quota":
+                        break
+                ctx.log_line(
+                    f"   pass 2 done — submitted {existing_submitted} existing URL(s)"
+                )
 
             if submitted > 0:
                 try:

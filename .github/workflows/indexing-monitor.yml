@@ -14,6 +14,11 @@ on:
         description: 'Supabase runs.id (UUID) created by the /api/run endpoint'
         required: true
         type: string
+      max_submissions:
+        description: 'Per-run submission cap. Empty/0 falls back to MAX_SUBMISSIONS_PER_RUN var (default 180). Used by the scheduler to ration the daily 200/day Indexing API quota.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -50,7 +55,7 @@ jobs:
           SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET:          ${{ secrets.SUPABASE_SECRET }}
           GOOGLE_CREDENTIALS:       ${{ secrets.GOOGLE_CREDENTIALS }}
-          MAX_SUBMISSIONS_PER_RUN:  ${{ vars.MAX_SUBMISSIONS_PER_RUN || '180' }}
+          MAX_SUBMISSIONS_PER_RUN:  ${{ inputs.max_submissions != '' && inputs.max_submissions != '0' && inputs.max_submissions || vars.MAX_SUBMISSIONS_PER_RUN || '180' }}
           MAX_SUBMIT_ATTEMPTS_PER_URL: ${{ vars.MAX_SUBMIT_ATTEMPTS_PER_URL || '5' }}
           PYTHONIOENCODING:         utf-8
           PYTHONUTF8:               '1'

@@ -44,14 +44,15 @@ def reset_is_new_and_upsert_urls(
     client_id: str,
     sitemap_urls: Iterable[str],
     today: str | None = None,
-) -> int:
+) -> list[str]:
     """Mirror of db.reset_is_new_and_upsert_urls for the Supabase backend.
 
     1. Flip is_new=false for every existing row in this client's url_status.
     2. Upsert every sitemap URL. Existing rows preserve their data; new rows
        get is_new=true and first_seen=today.
 
-    Returns the count of new rows inserted this run.
+    Returns the list of newly inserted URLs (sorted) so the caller can
+    prioritize them when submitting to the Indexing API.
 
     PostgREST doesn't give us a direct "insert-or-ignore + count new" in one
     request, so we do: (1) fetch existing URL set, (2) update is_new=false,
@@ -63,7 +64,7 @@ def reset_is_new_and_upsert_urls(
 
     urls = sorted({u.strip() for u in sitemap_urls if u and u.strip()})
     if not urls:
-        return 0
+        return []
 
     # (1) What URLs do we already have tracked for this client?
     existing_rows = sb.select(
@@ -102,7 +103,7 @@ def reset_is_new_and_upsert_urls(
             return_rows=False,
         )
 
-    return len(new_urls)
+    return new_urls
 
 
 def record_inspection(
