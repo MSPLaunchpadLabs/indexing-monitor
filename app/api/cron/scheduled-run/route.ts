@@ -26,6 +26,11 @@ const DAILY_QUOTA = 200;
 const SAFETY_BUFFER = 5; // leave headroom for manual /submit usage
 const MIN_PER_DISPATCH = 10; // skip ticks where there's nothing meaningful to send
 const FAIR_SHARE_FLOOR = 20; // never under-allocate a client to a tiny dispatch
+// If a client's most recent run failed within this window, skip them — gives
+// the operator time to fix onboarding (e.g. add the bot as a GSC Owner) without
+// the scheduler wasting GHA minutes dispatching the same broken client every
+// 6h. After 12h we retry once, so persistent issues still get visible.
+const FAIL_COOLDOWN_HOURS = 12;
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -108,21 +113,50 @@ export async function GET(request: Request) {
 
   const runningClients = new Set<string>();
   const lastFinishAt = new Map<string, number>();
+  // Most-recent terminal run (done OR failed) per client — used for the
+  // failure cooldown. We reuse runs[] which is already sorted DESC by
+  // started_at, so the first hit per client_id is the latest.
+  const lastTerminal = new Map<
+    string,
+    { status: "done" | "failed"; ts: number }
+  >();
   for (const r of runs ?? []) {
     if (r.status === "running") runningClients.add(r.client_id);
     if (r.status === "done" && !lastFinishAt.has(r.client_id)) {
       const ts = r.finished_at ?? r.started_at;
       lastFinishAt.set(r.client_id, new Date(ts).getTime());
     }
+    if (
+      (r.status === "done" || r.status === "failed") &&
+      !lastTerminal.has(r.client_id)
+    ) {
+      const ts = r.finished_at ?? r.started_at;
+      lastTerminal.set(r.client_id, {
+        status: r.status,
+        ts: new Date(ts).getTime(),
+      });
+    }
   }
 
-  const candidates = clients.filter((c) => !runningClients.has(c.id));
+  const cooldownCutoff =
+    Date.now() - FAIL_COOLDOWN_HOURS * 60 * 60 * 1000;
+  const cooledDown = new Set<string>();
+  for (const [clientId, last] of lastTerminal) {
+    if (last.status === "failed" && last.ts >= cooldownCutoff) {
+      cooledDown.add(clientId);
+    }
+  }
+
+  const candidates = clients.filter(
+    (c) => !runningClients.has(c.id) && !cooledDown.has(c.id),
+  );
   if (candidates.length === 0) {
     return NextResponse.json({
       ok: true,
       action: "skipped",
-      reason: "all-clients-have-running-run",
+      reason: "no-eligible-clients",
       running: [...runningClients],
+      cooled_down: [...cooledDown],
     });
   }
 
@@ -199,5 +233,6 @@ export async function GET(request: Request) {
     remaining,
     due_today: dueToday.length,
     candidates: candidates.length,
+    cooled_down: [...cooledDown],
   });
 }
