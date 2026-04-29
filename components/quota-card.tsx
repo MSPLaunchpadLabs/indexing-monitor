@@ -55,8 +55,8 @@ export function QuotaCard({ clients = [], quota }: Props) {
             className="mt-0.5 text-xs"
             style={{ color: "var(--text-soft)" }}
           >
-            Counts URL submissions since 00:00 UTC — resets at the next UTC
-            midnight.
+            Google&apos;s daily 200-page limit, shared across all clients. The
+            tool runs every hour to push new + not-indexed pages.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -142,7 +142,7 @@ export function QuotaCard({ clients = [], quota }: Props) {
         >
           <div className="mb-3 flex items-baseline justify-between gap-2">
             <h4 className="text-sm font-semibold">
-              Per-client submissions (today, UTC)
+              Per-client submissions today
             </h4>
             <span
               className="text-xs"
@@ -156,8 +156,7 @@ export function QuotaCard({ clients = [], quota }: Props) {
               className="text-xs"
               style={{ color: "var(--text-soft)" }}
             >
-              No URL submissions yet today. The quota fully resets at midnight
-              UTC.
+              Nothing submitted yet today. Resets at midnight UTC.
             </p>
           ) : (
             <ul className="flex flex-col gap-1.5">
