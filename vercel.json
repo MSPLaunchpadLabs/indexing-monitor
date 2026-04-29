@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/cron/scheduled-run",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 * * * *"
     }
   ]
 }

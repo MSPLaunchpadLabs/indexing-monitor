@@ -170,13 +170,21 @@ export async function GET(request: Request) {
   const pick = candidates[0];
 
   // ── 3. fair-share cap ────────────────────────────────────────────────────
-  // "Due today" = clients whose latest run finished before today UTC.
+  // "Due today" = clients whose latest run finished before today UTC. With
+  // hourly ticks, the first cycle of the day covers everyone in due_today;
+  // subsequent cycles see due_today.length === 0 and would otherwise hand
+  // the next picked client the entire remaining quota — fall back to
+  // splitting across all eligible candidates so the second/third cycle
+  // stays fair too.
   const startOfDayMs = startOfUtcDay.getTime();
   const dueToday = candidates.filter((c) => {
     const finishedAt = lastFinishAt.get(c.id);
     return finishedAt === undefined || finishedAt < startOfDayMs;
   });
-  const denom = Math.max(1, dueToday.length);
+  const denom = Math.max(
+    1,
+    dueToday.length > 0 ? dueToday.length : candidates.length,
+  );
   const fairShare = Math.floor(remaining / denom);
   const cap = Math.min(remaining, Math.max(FAIR_SHARE_FLOOR, fairShare));
 

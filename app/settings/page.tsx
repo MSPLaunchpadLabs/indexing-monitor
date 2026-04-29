@@ -101,15 +101,17 @@ export default async function SettingsPage() {
         </Block>
 
         <Block title="How often">
-          It runs by itself <strong>every 6 hours</strong>, picking one
-          client at a time. The client that hasn&apos;t been checked the
-          longest goes first.
+          It runs by itself <strong>every hour</strong> — picking the client
+          that hasn&apos;t been checked the longest. With ~25 minutes per
+          run, every client gets visited <strong>multiple times a day</strong>,
+          so new pages and any not-indexed backlog get pushed to Google fast.
         </Block>
 
         <Block title="The daily limit">
           Google caps us at <strong>{DAILY_QUOTA} pages a day</strong>{" "}
           (across <em>all</em> clients combined). The tool splits that
-          fairly, so no single client eats the whole budget.
+          fairly across clients and keeps dispatching every hour until the
+          200 is used up — that way none of the daily allowance is wasted.
         </Block>
 
         <Block title="New pages first">
