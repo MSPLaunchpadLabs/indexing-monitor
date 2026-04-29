@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 # repo root is the working directory when invoked with `python -m engine.runner`
 from api._supabase import Supabase, SupabaseError, eq
-from engine import supabase_db as db
+from engine import discord, supabase_db as db
 from gsc import (
     CredentialsMissingError,
     GoogleAuthError,
@@ -49,12 +49,22 @@ def _env_int(name: str, default: int) -> int:
 class RunContext:
     """Accumulates log tail + progress; flushes to Supabase on demand."""
 
-    def __init__(self, sb: Supabase, run_id: str):
+    def __init__(self, sb: Supabase, run_id: str, client_id: str):
         self.sb = sb
         self.run_id = run_id
+        self.client_id = client_id
+        # Falls back to the raw id until set_client() supplies a friendlier
+        # name — guarantees the Discord message always has *something*.
+        self.client_name = client_id
+        self.started_monotonic = time.monotonic()
         self.log: list[str] = []
         self.current = 0
         self.total = 0
+
+    def set_client(self, client: dict) -> None:
+        name = client.get("name") if isinstance(client, dict) else None
+        if name:
+            self.client_name = name
 
     def log_line(self, line: str) -> None:
         print(line, flush=True)
@@ -112,6 +122,27 @@ class RunContext:
             return_rows=False,
         )
 
+        # For "Total tracked" we prefer the snapshot total derived from the
+        # final indexed/not-indexed counts (matches what the dashboard tiles
+        # show). On failure those are zero, so fall back to whatever progress
+        # was last recorded — better than reporting 0 of 0.
+        total_for_msg = (
+            indexed_count + not_indexed_count
+            if status == "done"
+            else self.total
+        )
+        discord.notify_run_complete(
+            client_id=self.client_id,
+            client_name=self.client_name,
+            status=status,
+            total=total_for_msg,
+            indexed=indexed_count,
+            not_indexed=not_indexed_count,
+            submitted=submitted_count,
+            duration_seconds=time.monotonic() - self.started_monotonic,
+            error=error,
+        )
+
     def _pct(self) -> float:
         return (self.current / self.total * 100.0) if self.total else 0.0
 
@@ -119,7 +150,7 @@ class RunContext:
 def run(client_id: str, run_id: str) -> int:
     """Full run flow. Returns process exit code (0 = success)."""
     sb = Supabase()
-    ctx = RunContext(sb, run_id)
+    ctx = RunContext(sb, run_id, client_id)
 
     try:
         client = db.get_client(sb, client_id)
@@ -128,6 +159,7 @@ def run(client_id: str, run_id: str) -> int:
             ctx.finish(status="failed", error=f"client {client_id!r} not found in Supabase")
             return 2
 
+        ctx.set_client(client)
         ctx.log_line(f"client: {client['name']} ({client['domain']})")
         ctx.log_line(f"sitemap: {client['sitemap_url']}")
 

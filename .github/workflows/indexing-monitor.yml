@@ -55,6 +55,8 @@ jobs:
           SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET:          ${{ secrets.SUPABASE_SECRET }}
           GOOGLE_CREDENTIALS:       ${{ secrets.GOOGLE_CREDENTIALS }}
+          # Optional — if unset the engine silently skips Discord notifications.
+          DISCORD_WEBHOOK_URL:      ${{ secrets.DISCORD_WEBHOOK_URL }}
           MAX_SUBMISSIONS_PER_RUN:  ${{ inputs.max_submissions != '' && inputs.max_submissions != '0' && inputs.max_submissions || vars.MAX_SUBMISSIONS_PER_RUN || '180' }}
           MAX_SUBMIT_ATTEMPTS_PER_URL: ${{ vars.MAX_SUBMIT_ATTEMPTS_PER_URL || '5' }}
           PYTHONIOENCODING:         utf-8
