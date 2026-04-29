@@ -690,11 +690,25 @@ function UrlListPanel({
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Last Checked</th>
                 <th className="px-3 py-2">Coverage</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((r) => (
-                <UrlRow key={r.url} row={r} />
+                <UrlRow
+                  key={r.url}
+                  row={r}
+                  clientId={clientId}
+                  onUpdate={(updated) =>
+                    setRows((prev) =>
+                      prev
+                        ? prev.map((p) =>
+                            p.url === updated.url ? { ...p, ...updated } : p,
+                          )
+                        : prev,
+                    )
+                  }
+                />
               ))}
             </tbody>
           </table>
@@ -704,7 +718,23 @@ function UrlListPanel({
   );
 }
 
-function UrlRow({ row }: { row: UrlListRow }) {
+type UrlActionUpdate = Partial<UrlListRow> & { url: string };
+
+function UrlRow({
+  row,
+  clientId,
+  onUpdate,
+}: {
+  row: UrlListRow;
+  clientId: string;
+  onUpdate: (next: UrlActionUpdate) => void;
+}) {
+  const [busy, setBusy] = useState<"submit" | "inspect" | null>(null);
+  const [feedback, setFeedback] = useState<{
+    tone: "ok" | "err";
+    message: string;
+  } | null>(null);
+
   const indexedTone =
     row.indexed === "yes"
       ? "pill-success"
@@ -717,6 +747,47 @@ function UrlRow({ row }: { row: UrlListRow }) {
       : row.indexed === "no"
         ? "Not Indexed"
         : "Unknown";
+
+  async function runAction(action: "submit" | "inspect") {
+    if (busy) return;
+    setBusy(action);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/url-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: row.url, action }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        message?: string;
+        row?: UrlActionUpdate | null;
+        error?: string;
+      };
+      if (!res.ok) {
+        setFeedback({
+          tone: "err",
+          message: data.error ?? data.message ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      if (data.row) onUpdate(data.row);
+      setFeedback({
+        tone: data.ok ? "ok" : "err",
+        message:
+          data.message ??
+          (action === "submit" ? "Submitted" : "Inspected"),
+      });
+    } catch (err) {
+      setFeedback({
+        tone: "err",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
       <td className="px-3 py-2">
@@ -738,7 +809,58 @@ function UrlRow({ row }: { row: UrlListRow }) {
         {row.last_checked ? fmtDateTime(row.last_checked) : "—"}
       </td>
       <td className="px-3 py-2 text-xs" style={{ color: "var(--text-muted)" }}>
-        {row.notes || (row.submitted ? "Submitted to Indexing API" : "—")}
+        {feedback ? (
+          <span
+            style={{
+              color:
+                feedback.tone === "ok"
+                  ? "var(--color-success)"
+                  : "var(--color-danger)",
+            }}
+            title={feedback.message}
+          >
+            {feedback.message}
+          </span>
+        ) : (
+          row.notes || (row.submitted ? "Submitted to Indexing API" : "—")
+        )}
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex justify-end gap-1">
+          <a
+            href={`https://www.google.com/search?q=site:${encodeURIComponent(row.url)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-ghost"
+            title="View on Google"
+            aria-label="View on Google"
+            style={{ padding: "0.3rem 0.55rem", fontSize: "13px" }}
+          >
+            🔍
+          </a>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            title="Re-submit to Indexing API"
+            aria-label="Re-submit to Indexing API"
+            disabled={busy !== null}
+            onClick={() => runAction("submit")}
+            style={{ padding: "0.3rem 0.55rem", fontSize: "13px" }}
+          >
+            {busy === "submit" ? "…" : "↑"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            title="Re-inspect with URL Inspection API"
+            aria-label="Re-inspect with URL Inspection API"
+            disabled={busy !== null}
+            onClick={() => runAction("inspect")}
+            style={{ padding: "0.3rem 0.55rem", fontSize: "13px" }}
+          >
+            {busy === "inspect" ? "…" : "🔄"}
+          </button>
+        </div>
       </td>
     </tr>
   );

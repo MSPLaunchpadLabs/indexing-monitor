@@ -102,7 +102,14 @@ export type Database = {
   public: {
     Tables: {
       clients: TableDef<ClientRow>;
-      url_status: TableDef<UrlStatusRow>;
+      url_status: TableDef<
+        UrlStatusRow,
+        Partial<UrlStatusRow> & {
+          client_id: string;
+          url: string;
+          first_seen: string;
+        }
+      >;
       runs: TableDef<RunRow, Partial<RunRow> & { client_id: string }>;
       run_urls: TableDef<RunUrlRow>;
     };

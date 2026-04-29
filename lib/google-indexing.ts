@@ -9,19 +9,20 @@ type ServiceAccount = {
 
 type CachedToken = { token: string; expires_at: number };
 
-const INDEXING_SCOPE = "https://www.googleapis.com/auth/indexing";
+export const INDEXING_SCOPE = "https://www.googleapis.com/auth/indexing";
+export const WEBMASTERS_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const INDEXING_PUBLISH_URL =
   "https://indexing.googleapis.com/v3/urlNotifications:publish";
 
 let cachedSa: ServiceAccount | null = null;
-let cachedToken: CachedToken | null = null;
+const tokenCache = new Map<string, CachedToken>();
 
 /**
  * Resolve GOOGLE_CREDENTIALS the same way the Streamlit app does:
  *   - If it looks like JSON (starts with `{`), parse it directly.
  *   - Otherwise treat it as a file path and read the file.
  */
-function loadServiceAccount(): ServiceAccount {
+export function loadGoogleServiceAccount(): ServiceAccount {
   if (cachedSa) return cachedSa;
   const value = process.env.GOOGLE_CREDENTIALS;
   if (!value) {
@@ -76,13 +77,13 @@ function base64UrlEncode(input: string | Buffer): string {
     .replaceAll("/", "_");
 }
 
-/** Sign a JWT assertion asking Google for an access token scoped to the Indexing API. */
-function signAssertion(sa: ServiceAccount): string {
+/** Sign a JWT assertion asking Google for an access token scoped to `scope`. */
+function signAssertion(sa: ServiceAccount, scope: string): string {
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const claims = {
     iss: sa.client_email,
-    scope: INDEXING_SCOPE,
+    scope,
     aud: "https://oauth2.googleapis.com/token",
     iat: now,
     exp: now + 3600,
@@ -96,12 +97,18 @@ function signAssertion(sa: ServiceAccount): string {
   return `${unsigned}.${base64UrlEncode(sig)}`;
 }
 
-async function fetchAccessToken(): Promise<string> {
-  if (cachedToken && cachedToken.expires_at - 60 > Date.now() / 1000) {
-    return cachedToken.token;
+/**
+ * Mint or reuse a Google OAuth access token for the given scope. The token
+ * cache is keyed by scope so the indexing scope and the webmasters scope can
+ * both be held simultaneously without stomping on each other.
+ */
+export async function getGoogleAccessToken(scope: string): Promise<string> {
+  const cached = tokenCache.get(scope);
+  if (cached && cached.expires_at - 60 > Date.now() / 1000) {
+    return cached.token;
   }
-  const sa = loadServiceAccount();
-  const assertion = signAssertion(sa);
+  const sa = loadGoogleServiceAccount();
+  const assertion = signAssertion(sa, scope);
 
   const body = new URLSearchParams({
     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
@@ -119,11 +126,12 @@ async function fetchAccessToken(): Promise<string> {
     throw new Error(`Google token exchange failed (${res.status}): ${text.slice(0, 400)}`);
   }
   const data = (await res.json()) as { access_token: string; expires_in: number };
-  cachedToken = {
+  const entry: CachedToken = {
     token: data.access_token,
     expires_at: Math.floor(Date.now() / 1000) + (data.expires_in ?? 3600),
   };
-  return cachedToken.token;
+  tokenCache.set(scope, entry);
+  return entry.token;
 }
 
 export type SubmitResult = { ok: true } | { ok: false; message: string };
@@ -136,7 +144,7 @@ export type SubmitResult = { ok: true } | { ok: false; message: string };
 export async function submitUrlForIndexing(url: string): Promise<SubmitResult> {
   let token: string;
   try {
-    token = await fetchAccessToken();
+    token = await getGoogleAccessToken(INDEXING_SCOPE);
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }
