@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -112,13 +114,26 @@ class GoogleClient:
 
     def __init__(self, credentials_env_value: str, site_url: str):
         self.site_url = site_url
-        creds = _load_credentials(credentials_env_value)
+        self._creds = _load_credentials(credentials_env_value)
+        # Fail fast on bad creds. If the SA key was rotated in GCP without
+        # updating GOOGLE_CREDENTIALS, every API call would die later with
+        # "invalid_grant: Invalid JWT Signature" — usually after we'd already
+        # spent minutes inspecting URLs. Catch it here in 1s with a clear msg.
+        try:
+            self._creds.refresh(GoogleAuthRequest())
+        except RefreshError as e:
+            raise GoogleAuthError(
+                f"service account auth failed at startup ({e}). Most likely "
+                "the key in GOOGLE_CREDENTIALS was rotated or revoked in GCP "
+                "IAM. Generate a fresh JSON key for the service account and "
+                "update the GOOGLE_CREDENTIALS secret in GitHub Actions."
+            ) from e
         # cache_discovery=False silences a harmless warning on newer versions.
         self._search_console = build(
-            "searchconsole", "v1", credentials=creds, cache_discovery=False
+            "searchconsole", "v1", credentials=self._creds, cache_discovery=False
         )
         self._indexing = build(
-            "indexing", "v3", credentials=creds, cache_discovery=False
+            "indexing", "v3", credentials=self._creds, cache_discovery=False
         )
 
     # ---------- URL Inspection ----------
@@ -169,6 +184,19 @@ class GoogleClient:
         body = {"url": url, "type": "URL_UPDATED"}
         try:
             self._indexing.urlNotifications().publish(body=body).execute()
+        except RefreshError as e:
+            # Token went stale between phases (we've seen this fire on the
+            # first submit after a long inspect pass). Force one fresh JWT
+            # and retry; if it still fails, the key is genuinely bad.
+            try:
+                self._creds.refresh(GoogleAuthRequest())
+                self._indexing.urlNotifications().publish(body=body).execute()
+            except RefreshError as e2:
+                raise GoogleAuthError(
+                    f"Indexing API auth refused after refresh-and-retry ({e2}). "
+                    "The service account key was likely rotated. Update the "
+                    "GOOGLE_CREDENTIALS secret with a fresh JSON key."
+                ) from e2
         except HttpError as e:
             self._reraise_fatal(e)
             raise RuntimeError(_http_error_summary(e)) from e
