@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/scheduled-run",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-report",
+      "schedule": "0 4 * * *"
     }
   ]
 }

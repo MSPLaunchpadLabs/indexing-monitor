@@ -1,9 +1,15 @@
 """Run-completion notifications to Discord via webhook.
 
 Called from RunContext.finish() so every completion path (success or
-failure) emits exactly one message. Configured via the DISCORD_WEBHOOK_URL
-env var — leave it unset to disable notifications entirely. Best-effort:
-a webhook failure logs a warning but never breaks the run.
+failure) emits exactly one message. Two routes:
+
+  · DISCORD_WEBHOOK_URL          — the "ops" channel; success messages
+                                   AND the daily roll-up post here.
+  · DISCORD_ERROR_WEBHOOK_URL    — the "alerts" channel; failures only.
+                                   Falls back to the main webhook when
+                                   unset, so you can opt-in incrementally.
+
+Best-effort: a webhook failure logs a warning but never breaks the run.
 
 Why urllib instead of requests: matches engine/_supabase.py — keeps the
 GHA install footprint small and avoids one more transitive dep.
@@ -36,14 +42,21 @@ def notify_run_complete(
 ) -> None:
     """POST one Discord embed describing the finished run.
 
-    Never raises. If DISCORD_WEBHOOK_URL is unset, returns silently — that's
-    the documented way to opt out.
+    Never raises. If neither webhook is configured, returns silently —
+    that's the documented way to opt out. Failures route to
+    DISCORD_ERROR_WEBHOOK_URL when set, otherwise fall back to the main
+    webhook so an unconfigured error channel doesn't lose the alert.
     """
-    url = (webhook_url or os.environ.get("DISCORD_WEBHOOK_URL", "")).strip()
-    if not url:
+    is_success = status == "done"
+
+    success_url = (
+        webhook_url or os.environ.get("DISCORD_WEBHOOK_URL", "")
+    ).strip()
+    error_url = os.environ.get("DISCORD_ERROR_WEBHOOK_URL", "").strip()
+    target_url = success_url if is_success else (error_url or success_url)
+    if not target_url:
         return
 
-    is_success = status == "done"
     title_text = "complete" if is_success else "FAILED"
     fields = [
         {"name": "Status", "value": status, "inline": True},
@@ -77,7 +90,7 @@ def notify_run_complete(
 
     try:
         req = urllib.request.Request(
-            url,
+            target_url,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
