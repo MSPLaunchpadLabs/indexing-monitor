@@ -8,29 +8,48 @@ export const runtime = "nodejs";
 /**
  * GET /api/cron/scheduled-run
  *
- * The auto-scheduler. On each tick:
+ * Hourly scheduler with a daily fan-out model:
  *
- *   1. Compute today's used quota (since UTC midnight) from `url_status.last_submitted`.
- *   2. If remaining < MIN_PER_DISPATCH, skip — wait for UTC midnight reset.
- *   3. Pick the staleest client that doesn't have a run in flight.
- *   4. Fair-share the remaining quota across clients still due today, so one
- *      client doesn't eat the whole 195/day in tick 1.
- *   5. Insert a `runs` row and dispatch GHA with the computed cap.
+ *   1. Compute today's used quota (since UTC midnight) from
+ *      `url_status.last_submitted`.
+ *   2. Find every client that hasn't successfully completed today AND
+ *      isn't currently running AND isn't inside the failure cooldown.
+ *   3. Split the day's remaining Indexing API quota evenly across them
+ *      so every client gets a submit budget — no single client eats all
+ *      200 in one tick.
+ *   4. Insert one `runs` row per client and dispatch GHA in parallel.
  *
- * The engine then submits NEW URLs first, then existing not-indexed URLs,
- * within the cap (see engine/runner.py step 4).
+ * The runner inspects every URL (free) and submits new sitemap URLs
+ * first within its assigned cap (engine/runner.py step 4). If a client
+ * has fewer eligible URLs than its cap, leftover quota stays unused —
+ * we accept the slack rather than over-allocate to busy clients.
  *
- * Triggered by Vercel Cron at 00/06/12/18 UTC.
+ * Hourly ticks after the first successful fan-out are mostly no-ops:
+ * everyone already ran today, so candidates is empty. Failed clients
+ * become eligible again after FAIL_COOLDOWN_HOURS.
+ *
+ * Triggered by Vercel Cron at `0 * * * *`.
  */
 const DAILY_QUOTA = 200;
 const SAFETY_BUFFER = 5; // leave headroom for manual /submit usage
-const MIN_PER_DISPATCH = 10; // skip ticks where there's nothing meaningful to send
-const FAIR_SHARE_FLOOR = 20; // never under-allocate a client to a tiny dispatch
-// If a client's most recent run failed within this window, skip them — gives
-// the operator time to fix onboarding (e.g. add the bot as a GSC Owner) without
-// the scheduler wasting GHA minutes dispatching the same broken client every
-// 6h. After 12h we retry once, so persistent issues still get visible.
+const MIN_CAP_PER_CLIENT = 1; // never dispatch with cap=0 — engine yml treats it as "use default"
 const FAIL_COOLDOWN_HOURS = 12;
+
+type RunRow = {
+  client_id: string;
+  status: "running" | "done" | "failed";
+  started_at: string;
+  finished_at: string | null;
+};
+
+type DispatchResult = {
+  client_id: string;
+  client_name: string;
+  status: "dispatched" | "dispatch-failed";
+  run_id?: string;
+  cap?: number;
+  error?: string;
+};
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -43,11 +62,12 @@ export async function GET(request: Request) {
 
   const sb = supabase();
 
-  // ── 1. today's used quota ────────────────────────────────────────────────
   const startOfUtcDay = new Date();
   startOfUtcDay.setUTCHours(0, 0, 0, 0);
+  const startOfDayMs = startOfUtcDay.getTime();
   const cutoff = startOfUtcDay.toISOString();
 
+  // ── 1. today's used quota ────────────────────────────────────────────────
   const { data: subRows, error: subErr } = await sb
     .from("url_status")
     .select("client_id,last_submitted")
@@ -62,28 +82,34 @@ export async function GET(request: Request) {
   const usedToday = (subRows ?? []).filter((r) => r.last_submitted).length;
   const remaining = Math.max(0, DAILY_QUOTA - usedToday - SAFETY_BUFFER);
 
-  if (remaining < MIN_PER_DISPATCH) {
-    return NextResponse.json({
-      ok: true,
-      action: "skipped",
-      reason: "quota-exhausted-or-near-cap",
-      used_today: usedToday,
-      remaining,
-    });
-  }
+  // ── 2. clients + run history ─────────────────────────────────────────────
+  const [clientsRes, runsRes] = await Promise.all([
+    sb
+      .from("clients")
+      .select("id,name")
+      .returns<{ id: string; name: string }[]>(),
+    sb
+      .from("runs")
+      .select("client_id,status,started_at,finished_at")
+      .order("started_at", { ascending: false })
+      .returns<RunRow[]>(),
+  ]);
 
-  // ── 2. find candidates ───────────────────────────────────────────────────
-  const { data: clients, error: clientsErr } = await sb
-    .from("clients")
-    .select("id,name")
-    .returns<{ id: string; name: string }[]>();
-  if (clientsErr) {
+  if (clientsRes.error) {
     return NextResponse.json(
-      { error: `list clients: ${clientsErr.message}` },
+      { error: `list clients: ${clientsRes.error.message}` },
       { status: 502 },
     );
   }
-  if (!clients || clients.length === 0) {
+  if (runsRes.error) {
+    return NextResponse.json(
+      { error: `list runs: ${runsRes.error.message}` },
+      { status: 502 },
+    );
+  }
+
+  const clients = clientsRes.data ?? [];
+  if (clients.length === 0) {
     return NextResponse.json({
       ok: true,
       action: "skipped",
@@ -91,55 +117,31 @@ export async function GET(request: Request) {
     });
   }
 
-  // Latest run per client — used for both "skip if running" and "pick staleest".
-  const { data: runs, error: runsErr } = await sb
-    .from("runs")
-    .select("client_id,status,started_at,finished_at")
-    .order("started_at", { ascending: false })
-    .returns<
-      {
-        client_id: string;
-        status: "running" | "done" | "failed";
-        started_at: string;
-        finished_at: string | null;
-      }[]
-    >();
-  if (runsErr) {
-    return NextResponse.json(
-      { error: `list runs: ${runsErr.message}` },
-      { status: 502 },
-    );
-  }
-
+  const runs = runsRes.data ?? [];
   const runningClients = new Set<string>();
-  const lastFinishAt = new Map<string, number>();
-  // Most-recent terminal run (done OR failed) per client — used for the
-  // failure cooldown. We reuse runs[] which is already sorted DESC by
-  // started_at, so the first hit per client_id is the latest.
+  const succeededToday = new Set<string>();
   const lastTerminal = new Map<
     string,
     { status: "done" | "failed"; ts: number }
   >();
-  for (const r of runs ?? []) {
+  for (const r of runs) {
     if (r.status === "running") runningClients.add(r.client_id);
-    if (r.status === "done" && !lastFinishAt.has(r.client_id)) {
-      const ts = r.finished_at ?? r.started_at;
-      lastFinishAt.set(r.client_id, new Date(ts).getTime());
+    if (r.status === "done") {
+      const ts = new Date(r.finished_at ?? r.started_at).getTime();
+      if (ts >= startOfDayMs) succeededToday.add(r.client_id);
     }
     if (
       (r.status === "done" || r.status === "failed") &&
       !lastTerminal.has(r.client_id)
     ) {
-      const ts = r.finished_at ?? r.started_at;
       lastTerminal.set(r.client_id, {
         status: r.status,
-        ts: new Date(ts).getTime(),
+        ts: new Date(r.finished_at ?? r.started_at).getTime(),
       });
     }
   }
 
-  const cooldownCutoff =
-    Date.now() - FAIL_COOLDOWN_HOURS * 60 * 60 * 1000;
+  const cooldownCutoff = Date.now() - FAIL_COOLDOWN_HOURS * 60 * 60 * 1000;
   const cooledDown = new Set<string>();
   for (const [clientId, last] of lastTerminal) {
     if (last.status === "failed" && last.ts >= cooldownCutoff) {
@@ -148,99 +150,103 @@ export async function GET(request: Request) {
   }
 
   const candidates = clients.filter(
-    (c) => !runningClients.has(c.id) && !cooledDown.has(c.id),
+    (c) =>
+      !runningClients.has(c.id) &&
+      !succeededToday.has(c.id) &&
+      !cooledDown.has(c.id),
   );
+
   if (candidates.length === 0) {
     return NextResponse.json({
       ok: true,
       action: "skipped",
-      reason: "no-eligible-clients",
-      running: [...runningClients],
-      cooled_down: [...cooledDown],
+      reason: "all-clients-handled-today",
+      running: runningClients.size,
+      succeeded_today: succeededToday.size,
+      cooled_down: cooledDown.size,
     });
   }
 
-  // Staleest first: never-completed clients (no entry → -Infinity) win, then
-  // oldest finished_at.
-  candidates.sort((a, b) => {
-    const ta = lastFinishAt.get(a.id) ?? -Infinity;
-    const tb = lastFinishAt.get(b.id) ?? -Infinity;
-    return ta - tb;
-  });
-  const pick = candidates[0];
-
-  // ── 3. fair-share cap ────────────────────────────────────────────────────
-  // "Due today" = clients whose latest run finished before today UTC. With
-  // hourly ticks, the first cycle of the day covers everyone in due_today;
-  // subsequent cycles see due_today.length === 0 and would otherwise hand
-  // the next picked client the entire remaining quota — fall back to
-  // splitting across all eligible candidates so the second/third cycle
-  // stays fair too.
-  const startOfDayMs = startOfUtcDay.getTime();
-  const dueToday = candidates.filter((c) => {
-    const finishedAt = lastFinishAt.get(c.id);
-    return finishedAt === undefined || finishedAt < startOfDayMs;
-  });
-  const denom = Math.max(
-    1,
-    dueToday.length > 0 ? dueToday.length : candidates.length,
+  // ── 3. split remaining quota across all candidates ──────────────────────
+  // Equal share. If a client has fewer eligible URLs than its cap, the
+  // leftover stays unspent — that's preferable to handing it to a busy
+  // client and starving the small ones.
+  const capPerClient = Math.max(
+    MIN_CAP_PER_CLIENT,
+    Math.floor(remaining / candidates.length),
   );
-  const fairShare = Math.floor(remaining / denom);
-  const cap = Math.min(remaining, Math.max(FAIR_SHARE_FLOOR, fairShare));
 
-  // ── 4. create runs row + dispatch ────────────────────────────────────────
-  const { data: created, error: createErr } = await sb
-    .from("runs")
-    .insert({
-      client_id: pick.id,
-      status: "running",
-      started_at: new Date().toISOString(),
-      log_tail: [
-        `queued by scheduler · cap=${cap} · used_today=${usedToday}/${DAILY_QUOTA}`,
-      ],
-    })
-    .select("id")
-    .returns<{ id: string }[]>()
-    .single();
+  // ── 4. fan out: create runs row + dispatch GHA per client ────────────────
+  const results = await Promise.all(
+    candidates.map(async (client): Promise<DispatchResult> => {
+      const { data: created, error: createErr } = await sb
+        .from("runs")
+        .insert({
+          client_id: client.id,
+          status: "running",
+          started_at: new Date().toISOString(),
+          log_tail: [
+            `queued by scheduler · cap=${capPerClient} · used_today=${usedToday}/${DAILY_QUOTA} · fan_out=${candidates.length}`,
+          ],
+        })
+        .select("id")
+        .returns<{ id: string }[]>()
+        .single();
 
-  if (createErr || !created) {
-    return NextResponse.json(
-      {
-        error: `failed to create run row: ${createErr?.message ?? "unknown"}`,
-      },
-      { status: 500 },
-    );
-  }
+      if (createErr || !created) {
+        return {
+          client_id: client.id,
+          client_name: client.name,
+          status: "dispatch-failed",
+          error: `create runs row: ${createErr?.message ?? "unknown"}`,
+        };
+      }
 
-  try {
-    await dispatchIndexingRun(pick.id, created.id, { maxSubmissions: cap });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await sb
-      .from("runs")
-      .update({
-        status: "failed",
-        finished_at: new Date().toISOString(),
-        error: `scheduler dispatch failed: ${message}`.slice(0, 2000),
-      })
-      .eq("id", created.id);
-    return NextResponse.json(
-      { error: `dispatch failed: ${message}` },
-      { status: 502 },
-    );
-  }
+      try {
+        await dispatchIndexingRun(client.id, created.id, {
+          maxSubmissions: capPerClient,
+        });
+        return {
+          client_id: client.id,
+          client_name: client.name,
+          status: "dispatched",
+          run_id: created.id,
+          cap: capPerClient,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await sb
+          .from("runs")
+          .update({
+            status: "failed",
+            finished_at: new Date().toISOString(),
+            error: `scheduler dispatch failed: ${message}`.slice(0, 2000),
+          })
+          .eq("id", created.id);
+        return {
+          client_id: client.id,
+          client_name: client.name,
+          status: "dispatch-failed",
+          run_id: created.id,
+          error: message,
+        };
+      }
+    }),
+  );
+
+  const dispatched = results.filter((r) => r.status === "dispatched");
+  const failed = results.filter((r) => r.status === "dispatch-failed");
 
   return NextResponse.json({
     ok: true,
-    action: "dispatched",
-    client_id: pick.id,
-    client_name: pick.name,
-    run_id: created.id,
-    cap,
+    action: "fanned-out",
     used_today: usedToday,
     remaining,
-    due_today: dueToday.length,
-    candidates: candidates.length,
-    cooled_down: [...cooledDown],
+    cap_per_client: capPerClient,
+    dispatched: dispatched.length,
+    dispatch_failed: failed.length,
+    succeeded_today: succeededToday.size,
+    cooled_down: cooledDown.size,
+    results,
   });
 }

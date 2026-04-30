@@ -113,6 +113,18 @@ export async function GET(request: Request) {
   const clients = clientsRes.data ?? [];
   const urlStatuses = urlStatusRes.data ?? [];
 
+  // Skip silent days — no runs at all means nothing meaningful to celebrate.
+  // Keeps the ops channel quiet on the rare day the scheduler had nothing to
+  // dispatch (e.g. all clients in failure cooldown).
+  if (runs.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      posted: false,
+      reason: "no-runs-yesterday",
+      day: yesterdayStart.toISOString().slice(0, 10),
+    });
+  }
+
   // ── per-client aggregates ───────────────────────────────────────────────
   const blank = (): Aggregate => ({
     runs: 0,
@@ -140,8 +152,10 @@ export async function GET(request: Request) {
   }
 
   // ── totals ──────────────────────────────────────────────────────────────
+  const clientsCovered = new Set(runs.map((r) => r.client_id)).size;
   const totals = {
     runs: runs.length,
+    clients_covered: clientsCovered,
     done: runs.filter((r) => r.status === "done").length,
     failed: runs.filter((r) => r.status === "failed").length,
     inspected: runs.reduce((s, r) => s + (r.current ?? 0), 0),
@@ -208,10 +222,10 @@ export async function GET(request: Request) {
 
   const quotaPct = Math.round((totals.submitted / DAILY_QUOTA) * 100);
   const description =
-    `Runs: **${totals.runs}** (${totals.done} done · ${totals.failed} failed) · ` +
-    `Inspected: **${totals.inspected.toLocaleString("en-US")}** URLs\n` +
-    `Submitted to Google: **${totals.submitted}** / ${DAILY_QUOTA} ` +
-    `(${quotaPct}% of daily quota)\n\n` +
+    `**${totals.clients_covered}** client${totals.clients_covered === 1 ? "" : "s"} ran · ` +
+    `**${totals.inspected.toLocaleString("en-US")}** URLs inspected · ` +
+    `**${totals.submitted}** submitted for indexing (${quotaPct}% of ${DAILY_QUOTA}/day quota)\n` +
+    `**${totals.indexed.toLocaleString("en-US")}** URLs are currently indexed by Google across all sites\n\n` +
     "```\n" +
     table +
     "\n```";
